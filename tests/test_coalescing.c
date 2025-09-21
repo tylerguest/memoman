@@ -38,5 +38,27 @@ int main() {
     print_free_list();
 
     printf("=== Coalescing Test Complete ===\n");
+
+    printf("=== True Coalescing Test ===\n");
+
+    char* ptr5 = (char*)my_malloc(100);
+    char* ptr6 = (char*)my_malloc(200);
+    char* ptr7 = (char*)my_malloc(150);
+
+    printf("Addresses: ptr5=%p, ptr6=%p, ptr7=%p\n",
+    (void*)ptr5, (void*)ptr6, (void*)ptr7);
+
+    printf("\n1. Free ptr5:\n");
+    my_free(ptr5);
+    print_free_list();
+
+    printf("\n2. Free ptr6 (adjacent to ptr5):\n");
+    my_free(ptr6);
+    print_free_list();
+
+    printf("\n3. Free ptr7 (adjacent to ptr6):\n");
+    my_free(ptr7);
+    print_free_list();
+
     return 0;
 }
