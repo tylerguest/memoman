@@ -10,6 +10,9 @@ static size_t total_allocated = 0;
 
 static block_header_t* free_list = NULL;
 
+static void coalesce_free_blocks(void);
+static void sort_free_list_by_address(void);
+
 static size_t align_size(size_t size) {
     return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
 }
@@ -100,10 +103,69 @@ void my_free(void* ptr) {
     block_header_t* header = user_to_header(ptr);
     header->is_free = 1;
 
+    printf("Freed block of %zu bytes at %p\n", header->size, ptr);
+
     header->next = free_list;
     free_list = header;
 
-    printf("Freed block of %zu bytes at %p\n", header->size, ptr);
+    coalesce_free_blocks();
+}
+
+static void coalesce_free_blocks(void) {
+    if (free_list == NULL) return;
+
+    printf("Attempting to coalesce adjacent blocks...\n");
+
+    sort_free_list_by_address();
+
+    block_header_t* current = free_list;
+
+    while (current != NULL && current->next != NULL) {
+        block_header_t* next = current->next;
+        
+        char* current_end = (char*)header_to_user(current) + current->size;
+        char* next_start = (char*)next;
+
+        if (current_end == next_start) {
+            printf("Coalescing blocks: %zu + %zu = %zu bytes\n",
+                    current->size,
+                    sizeof(block_header_t) + next->size,
+                    current->size + sizeof(block_header_t) + next->size);
+            current->size += sizeof(block_header_t) + next->size;
+            current->next = next->next;
+            continue;
+        }
+        current = current->next;
+    }
+}
+
+static void sort_free_list_by_address(void) {
+    if (free_list == NULL || free_list->next == NULL) return;
+
+    int swapped;
+    do {
+        swapped = 0;
+        block_header_t* prev = NULL;
+        block_header_t* current = free_list;
+
+        while (current != NULL && current->next != NULL) {
+            if (current > current->next) {
+                block_header_t* next = current->next;
+                if (prev == NULL) {
+                    free_list = next;
+                } else { prev->next = next; }
+                
+                current->next = next->next;
+                next->next = current;
+
+                swapped = 1;
+                prev = next;
+            } else {
+                prev = current;
+                current = current->next;
+            }
+        }
+    } while (swapped);
 }
 
 void print_heap_stats(void) {
@@ -114,6 +176,21 @@ void print_heap_stats(void) {
     printf("Free space: %zu bytes\n", sizeof(heap) - total_allocated);
     printf("Usage: %.1f%%\n",
            (double)total_allocated / sizeof(heap) * 100);
+    printf("====================\n\n");
+}
+
+void print_free_list(void) {
+    printf("\n=== Free List ===\n");
+    block_header_t* current = free_list;
+    int count = 0;
+
+    while (current != NULL) {
+        printf("Block %d: %zu bytes at %p\n",
+                count++, current->size, (void*)current);
+        current = current->next;
+    }
+
+    if (count == 0) { printf("Free list is empty\n"); }
     printf("====================\n\n");
 }
 

@@ -18,4 +18,6 @@ size_t get_free_space(void);
 
 void reset_allocator(void);
 
+void print_free_list(void);
+
 #endif
