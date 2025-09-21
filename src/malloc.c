@@ -27,6 +27,50 @@ void* my_malloc(size_t size) {
 
     size = align_size(size);
 
+    block_header_t* prev = NULL;
+    block_header_t* current_block = free_list;
+
+    while (current_block != NULL) {
+        if (current_block->size >= size) {
+            if (prev == NULL) {
+                free_list = current_block->next;
+            } else {
+                prev->next = current_block->next;
+            }
+
+            size_t remaining_size = current_block->size - size;
+            size_t min_split_size = sizeof(block_header_t) + ALIGNMENT;
+
+            if (remaining_size >= min_split_size) {
+                char* split_point = (char*)header_to_user(current_block) + size;
+                block_header_t* new_block = (block_header_t*)split_point;
+
+                new_block->size = remaining_size - sizeof(block_header_t);
+                new_block->is_free = 1;
+                new_block->next = free_list;
+
+                free_list = new_block;
+
+                current_block->size = size;
+
+                printf("Split block: used %zu bytes, created free block of %zu bytes\n",
+                       size, new_block->size);
+            }
+
+            current_block->is_free = 0;
+            current_block->next = NULL;
+
+            void* user_ptr = header_to_user(current_block);
+            printf("Reused block of %zu bytes (requested %zu) at %p\n",
+                   current_block->size, size, user_ptr);
+
+            return user_ptr;
+        }
+
+        prev = current_block;
+        current_block = current_block->next;
+    }
+
     size_t total_size = sizeof(block_header_t) + size;
 
     // check for space
