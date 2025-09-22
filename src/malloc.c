@@ -8,6 +8,11 @@ static char heap[1024 * 1024]; // 1MB heap
 static char* current = heap;
 static size_t total_allocated = 0;
 
+static int debug_output = 0;
+
+static int free_count = 0;
+static const int COALESCE_THRESHOLD = 50;
+
 static block_header_t* free_list = NULL;
 
 static void coalesce_free_blocks(void);
@@ -53,18 +58,17 @@ void* my_malloc(size_t size) {
                 new_block->next = free_list;
 
                 free_list = new_block;
-
                 current_block->size = size;
 
-                printf("Split block: used %zu bytes, created free block of %zu bytes\n",
+                if (debug_output) printf("Split block: used %zu bytes, created free block of %zu bytes\n",
                        size, new_block->size);
-            }
+            } else {}
 
             current_block->is_free = 0;
             current_block->next = NULL;
 
             void* user_ptr = header_to_user(current_block);
-            printf("Reused block of %zu bytes (requested %zu) at %p\n",
+            if (debug_output) printf("Reused block of %zu bytes (requested %zu) at %p\n",
                    current_block->size, size, user_ptr);
 
             return user_ptr;
@@ -78,7 +82,7 @@ void* my_malloc(size_t size) {
 
     // check for space
     if (current + total_size > heap + sizeof(heap)) {
-        printf("Out of memory!\n");
+        if (debug_output) printf("Out of memory!\n");
         return NULL;
     }
 
@@ -91,7 +95,7 @@ void* my_malloc(size_t size) {
     total_allocated += total_size;
 
     void* user_ptr = header_to_user(header);
-    printf("Allocated %zu bytes (+ %zu header) at %p\n",
+    if (debug_output) printf("Allocated %zu bytes (+ %zu header) at %p\n",
            size, sizeof(block_header_t), user_ptr);
 
     return user_ptr;
@@ -103,18 +107,21 @@ void my_free(void* ptr) {
     block_header_t* header = user_to_header(ptr);
     header->is_free = 1;
 
-    printf("Freed block of %zu bytes at %p\n", header->size, ptr);
+    if (debug_output) printf("Freed block of %zu bytes at %p\n", header->size, ptr);
 
     header->next = free_list;
     free_list = header;
 
-    coalesce_free_blocks();
+    if (++free_count >= COALESCE_THRESHOLD) {
+        coalesce_free_blocks();
+        free_count = 0;
+    }
 }
 
 static void coalesce_free_blocks(void) {
     if (free_list == NULL) return;
 
-    printf("Attempting to coalesce adjacent blocks...\n");
+    if (debug_output) printf("Attempting to coalesce adjacent blocks...\n");
 
     sort_free_list_by_address();
 
@@ -127,7 +134,7 @@ static void coalesce_free_blocks(void) {
         char* next_start = (char*)next;
 
         if (current_end == next_start) {
-            printf("Coalescing blocks: %zu + %zu = %zu bytes\n",
+            if (debug_output) printf("Coalescing blocks: %zu + %zu = %zu bytes\n",
                     current->size,
                     sizeof(block_header_t) + next->size,
                     current->size + sizeof(block_header_t) + next->size);
@@ -169,29 +176,31 @@ static void sort_free_list_by_address(void) {
 }
 
 void print_heap_stats(void) {
-    printf("\n=== Heap Statistics ===\n");
-    printf("Total heap size: %zu bytes (%.2f MB)\n",
+    size_t used_heap = current - heap;
+    size_t free_heap = sizeof(heap) - used_heap;
+
+    if (debug_output) printf("\n=== Heap Statistics ===\n");
+    if (debug_output) printf("Total heap size: %zu bytes (%.2f MB)\n",
            sizeof(heap), sizeof(heap) / (1024.0 * 1024.0));
-    printf("Total allocated: %zu bytes\n", total_allocated);
-    printf("Free space: %zu bytes\n", sizeof(heap) - total_allocated);
-    printf("Usage: %.1f%%\n",
-           (double)total_allocated / sizeof(heap) * 100);
-    printf("====================\n\n");
+    if (debug_output) printf("Used heap space: %zu bytes\n", used_heap);
+    if (debug_output) printf("Free heap space: %zu bytes\n", free_heap);
+    if (debug_output) printf("Usage: %.1f%%\n",(double)used_heap / sizeof(heap) * 100);
+    if (debug_output) printf("====================\n\n");
 }
 
 void print_free_list(void) {
-    printf("\n=== Free List ===\n");
+    if (debug_output) printf("\n=== Free List ===\n");
     block_header_t* current = free_list;
     int count = 0;
 
     while (current != NULL) {
-        printf("Block %d: %zu bytes at %p\n",
+        if (debug_output) printf("Block %d: %zu bytes at %p\n",
                 count++, current->size, (void*)current);
         current = current->next;
     }
 
-    if (count == 0) { printf("Free list is empty\n"); }
-    printf("====================\n\n");
+    if (count == 0) { if (debug_output) printf("Free list is empty\n"); }
+    if (debug_output) printf("====================\n\n");
 }
 
 size_t get_total_allocated(void) {
@@ -199,12 +208,13 @@ size_t get_total_allocated(void) {
 }
 
 size_t get_free_space(void) {
-    return sizeof(heap) - total_allocated;
+    return sizeof(heap) - (current - heap);
 }
 
 void reset_allocator(void) {
     current = heap;
     total_allocated = 0;
+    free_list = NULL;
     
-    printf("Allocator reset - all memory freed\n");
+    if (debug_output) printf("Allocator reset - all memory freed\n");
 }
