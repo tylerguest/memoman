@@ -14,13 +14,49 @@ static void coalesce_free_blocks(void);
 static void sort_free_list_by_address(void);
 static size_t align_size(size_t size) { return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1); }
 static void* header_to_user(block_header_t* header) { return (char*)header + sizeof(block_header_t); }
-static block_header_t* user_to_header(void* ptr) {
-    return (block_header_t*)((char*)ptr - sizeof(block_header_t));
+static block_header_t* user_to_header(void* ptr) { return (block_header_t*)((char*)ptr - sizeof(block_header_t)); }
+static block_header_t* size_classes[8] = {NULL};
+static const size_t class_sizes[8] = {16, 32, 64, 128, 256, 512, 1024, 2048};
+
+static int get_size_class(size_t size) {
+    for (int i = 0; i < 8; i++) {
+        if (size <= class_sizes[i]) { return i; }
+    }
+    return -1;
+}
+
+static void* pop_from_class(int class) {
+    if (class < 0 || class >= 8 || !size_classes[class]) { return NULL; }
+    block_header_t* block = size_classes[class];
+    size_classes[class] = block->next;
+    block->is_free = 0;
+    block->next = NULL;
+    if (debug_output) printf("Fast allocation from class %d: %zu bytes at %p\n",
+                            class, block->size, header_to_user(block));
+    return header_to_user(block);
+}
+
+static void push_to_class(block_header_t* block) {
+    int class = get_size_class(block->size);
+    if (class >= 0) {
+        block->next = size_classes[class];
+        size_classes[class] = block;
+        if (debug_output) printf("Added block to size class %d: %zu bytes\n",
+                                class, block->size);
+        return;
+    }
+    block->next = free_list;
+    free_list = block;
 }
 
 void* my_malloc(size_t size) {
     if (size == 0) return NULL;
     size = align_size(size);
+    int class = get_size_class(size);
+    if (class >= 0) {
+        void* ptr = pop_from_class(class);
+        if (ptr) { return ptr; }
+    }
     block_header_t* prev = NULL;
     block_header_t* current_block = free_list;
     while (current_block != NULL) {
@@ -34,12 +70,11 @@ void* my_malloc(size_t size) {
                 block_header_t* new_block = (block_header_t*)split_point;
                 new_block->size = remaining_size - sizeof(block_header_t);
                 new_block->is_free = 1;
-                new_block->next = free_list;
-                free_list = new_block;
+                push_to_class(new_block);
                 current_block->size = size;
                 if (debug_output) printf("Split block: used %zu bytes, created free block of %zu bytes\n",
                                         size, new_block->size);
-            } else {}
+            }
             current_block->is_free = 0;
             current_block->next = NULL;
             void* user_ptr = header_to_user(current_block);
@@ -72,8 +107,12 @@ void my_free(void* ptr) {
     block_header_t* header = user_to_header(ptr);
     header->is_free = 1;
     if (debug_output) printf("Freed block of %zu bytes at %p\n", header->size, ptr);
-    header->next = free_list;
-    free_list = header;
+    int class = get_size_class(header->size);
+    if (class >= 0) { push_to_class(header); }
+    else {
+        header->next = free_list;
+        free_list = header;
+    }
     if (++free_count >= COALESCE_THRESHOLD) {
         coalesce_free_blocks();
         free_count = 0;
@@ -134,7 +173,6 @@ void reset_allocator(void) {
 }
 
 size_t get_total_allocated(void) { return total_allocated; }
-
 size_t get_free_space(void) { return sizeof(heap) - (current - heap); }
 
 void print_heap_stats(void) {
