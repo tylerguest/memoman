@@ -3,11 +3,9 @@ CFLAGS = -Wall -Wextra -std=c99 -g
 
 $(shell mkdir -p tests/bin)
 
-# Pattern rule
 tests/bin/%: tests/%.c src/malloc.c src/malloc.h
 	$(CC) $(CFLAGS) -Isrc -o $@ src/malloc.c $<
 
-# Auto-detect all test files
 TEST_SOURCES = $(wildcard tests/test*.c)
 TESTS = $(patsubst tests/%.c,tests/bin/%,$(TEST_SOURCES))
 
