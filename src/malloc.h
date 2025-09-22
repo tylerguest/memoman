@@ -11,13 +11,11 @@ typedef struct block_header {
 
 void* my_malloc(size_t size);
 void my_free(void* ptr);
-
 void print_heap_stats(void);
+void reset_allocator(void);
+void print_free_list(void);
+
 size_t get_total_allocated(void);
 size_t get_free_space(void);
-
-void reset_allocator(void);
-
-void print_free_list(void);
 
 #endif

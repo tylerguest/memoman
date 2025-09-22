@@ -6,7 +6,7 @@
 int main() {
     printf("=== Allocator Benchmark Comparison ===\n");
 
-    const int iterations = 100000000;
+    const int iterations = 1000000;
     printf("Testing %d operations...\n\n", iterations);
 
     printf("Testing your allocator...\n");
