@@ -16,6 +16,7 @@
 
 #define ALIGNMENT 8
 #define COALESCE_THRESHOLD 50
+#define NUM_SIZE_CLASSES 8
 
 static char heap[1024 * 1024];
 static char* current = heap;
@@ -52,7 +53,7 @@ static block_header_t* user_to_header(void* ptr) {
 
 // Find size class index, or -1 if too large
 static int get_size_class(size_t size) {
-    for (int i = 0; i < sizeof(class_sizes) / sizeof(class_sizes[0]); i++) {
+    for (int i = 0; i < NUM_SIZE_CLASSES; i++) {
         if (size <= class_sizes[i]) {
             return i;
         }
@@ -62,7 +63,7 @@ static int get_size_class(size_t size) {
 
 // O(1) allocation from size class
 static void* pop_from_class(int class) {
-    if (class < 0 || class >= 8 || !size_classes[class]) {
+    if (class < 0 || class >= NUM_SIZE_CLASSES || !size_classes[class]) {
         return NULL;
     }
     
