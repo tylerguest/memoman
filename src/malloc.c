@@ -25,7 +25,6 @@ static int free_count = 0;
 static block_header_t* free_list = NULL;
 static block_header_t* size_classes[8] = {NULL};
 static const size_t class_sizes[8] = {16, 32, 64, 128, 256, 512, 1024, 2048};
-
 static void coalesce_free_blocks(void);
 static void sort_free_list_by_address(void);
 
@@ -53,7 +52,7 @@ static block_header_t* user_to_header(void* ptr) {
 
 // Find size class index, or -1 if too large
 static int get_size_class(size_t size) {
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < sizeof(class_sizes) / sizeof(class_sizes[0]); i++) {
         if (size <= class_sizes[i]) {
             return i;
         }

@@ -22,7 +22,7 @@ int main() {
     my_free(ptr2);
     print_free_list();
 
-    printf("3. Free first block (should coalesve with middle):\n");
+    printf("3. Free first block (should coalesce with middle):\n");
     my_free(ptr1);
     print_free_list();
 
