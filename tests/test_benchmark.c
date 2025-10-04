@@ -18,19 +18,19 @@ int main() {
 
     for (int i = 0; i < iterations; i++) {
         if (active_count < 100 || (i % 2 == 0)) {
-            void* ptr = my_malloc(100 + i % 400);
+            void* ptr = memomall(100 + i % 400);
             if (ptr && active_count < 100) {
                 ptrs[active_count++] = ptr;
-            } else if (ptr) { my_free(ptr); }
+            } else if (ptr) { memofree(ptr); }
         } else {
             int idx = rand() % active_count;
-            my_free(ptrs[idx]);
+            memofree(ptrs[idx]);
             ptrs[idx] = ptrs[--active_count];
         }
     }
 
     for (int i = 0; i < active_count; i++) {
-        my_free(ptrs[i]);
+        memofree(ptrs[i]);
     }
 
     clock_t end = clock();

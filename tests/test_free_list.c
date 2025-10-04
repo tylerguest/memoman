@@ -6,9 +6,9 @@ int main() {
     printf("=== Free List Reuse Test ===\n");
 
     printf("1. Allocate some blocks:\n");
-    char* ptr1 = (char*)my_malloc(100);
-    char* ptr2 = (char*)my_malloc(200);
-    char* ptr3 = (char*)my_malloc(50);
+    char* ptr1 = (char*)memomall(100);
+    char* ptr2 = (char*)memomall(200);
+    char* ptr3 = (char*)memomall(50);
 
     strcpy(ptr1, "Block A");
     strcpy(ptr2, "Block B");
@@ -17,10 +17,10 @@ int main() {
     print_heap_stats();
 
     printf("2. Free the middle block:\n");
-    my_free(ptr2);
+    memofree(ptr2);
 
     printf("3. Allocate smaller block (should reuse freed space):\n");
-    char* ptr4 = (char*)my_malloc(150);
+    char* ptr4 = (char*)memomall(150);
     strcpy(ptr4, "Block D (reused!)");
 
     printf("   ptr1: %s\n", ptr1);
@@ -28,7 +28,7 @@ int main() {
     printf("   ptr3: %s\n", ptr3);
 
     printf("4. Allocate another block (should be new):\n");
-    char* ptr5 = (char*)my_malloc(300);
+    char* ptr5 = (char*)memomall(300);
     strcpy(ptr5, "Block E (new)");
     printf("   ptr5: %s\n", ptr5);
 

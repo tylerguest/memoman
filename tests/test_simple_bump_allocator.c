@@ -6,8 +6,8 @@ int main() {
     printf("=== Simple Bump Allocator Test ===\n");
 
     printf("1. Testing basic allocation:\n");
-    char* ptr1 = (char*)my_malloc(10);
-    char* ptr2 = (char*)my_malloc(20);
+    char* ptr1 = (char*)memomall(10);
+    char* ptr2 = (char*)memomall(20);
 
     if (ptr1 && ptr2) {
         strcpy(ptr1, "Hello");
@@ -23,7 +23,7 @@ int main() {
     if (ptr2 > ptr1) { printf("   Addresses are sequential\n"); }
 
     printf("\n3. Testing free:\n");
-    my_free(ptr1);
+    memofree(ptr1);
 
     printf("\n=== Test Complete ===");
     return 0;

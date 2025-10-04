@@ -9,9 +9,9 @@ int main() {
     print_heap_stats();
 
     printf("2. After allocations:\n");
-    char* ptr1 = (char*)my_malloc(100);
-    char* ptr2 = (char*)my_malloc(100);
-    int*  ptr3 = (int*)my_malloc(sizeof(int) * 50);
+    char* ptr1 = (char*)memomall(100);
+    char* ptr2 = (char*)memomall(100);
+    int*  ptr3 = (int*)memomall(sizeof(int) * 50);
 
     print_heap_stats();
 
@@ -32,8 +32,8 @@ int main() {
     printf("\n");
 
     printf("\n5. After more allocations:\n");
-    my_malloc(1000);   // 1KB
-    my_malloc(5000);   // 5KB
+    memomall(1000);   // 1KB
+    memomall(5000);   // 5KB
 
     print_heap_stats();
 

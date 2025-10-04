@@ -7,20 +7,20 @@ int main() {
     void* ptrs[10];
 
     for (int i = 0; i < 10; i++) {
-        ptrs[i] = my_malloc(50 + i * 20);
+        ptrs[i] = memomall(50 + i * 20);
         printf("Allocated ptr[%d]\n", i);
     }
 
     print_free_list();
 
     for (int i = 1; i < 10; i += 2) {
-        my_free(ptrs[i]);
+        memofree(ptrs[i]);
         printf("Freed ptr[%d]\n", i);
     }
 
     print_free_list();
 
-    void* big = my_malloc(500);
+    void* big = memomall(500);
     print_free_list();
 
     return 0;
