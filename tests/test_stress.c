@@ -20,8 +20,5 @@ int main() {
 
     print_free_list();
 
-    void* big = memomall(500);
-    print_free_list();
-
     return 0;
 }
