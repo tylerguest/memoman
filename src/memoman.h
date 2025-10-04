@@ -1,5 +1,5 @@
-#ifndef MALLOC_H
-#define MALLOC_H
+#ifndef MEMOMAN_H
+#define MEMOMAN_H
 
 #include <stddef.h>
 

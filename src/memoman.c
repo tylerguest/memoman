@@ -7,7 +7,7 @@
  * - 1MB static heap, 8-byte alignment
  */
 
-#include "malloc.h"
+#include "memoman.h"
 #include <stdio.h>
 
 // ============================================================================
