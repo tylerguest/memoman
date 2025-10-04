@@ -29,6 +29,22 @@ clean:
 	rmdir tests/bin 2>/dev/null || true
 
 run: all
-	@for test in $(TESTS); do echo "=== $$test ==="; $$test; echo; done
-
+	@echo "=== Running All Tests ==="
+	@failed=0; \
+	for test in $(TESTS); do \
+	    if $$test > /dev/null 2>&1; then \
+	        echo "PASSED: $$(basename $$test)"; \
+	    else \
+	        echo "FAILED: $$(basename $$test)"; \
+	        failed=$$((failed + 1)); \
+	    fi; \
+	done; \
+	echo "==================="; \
+	if [ $$failed -eq 0 ]; then \
+	    echo "All tests passed!"; \
+	else \
+	    echo "$$failed test(s) failed"; \
+	    exit 1; \
+	fi	
+	
 .PHONY: all benchmark debug clean run
