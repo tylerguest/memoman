@@ -218,6 +218,10 @@ static void coalesce_free_blocks(void) {
 // MANAGEMENT
 // ============================================================================
 
+size_t get_total_allocated(void) { return total_allocated; }
+size_t get_free_space(void) { return sizeof(heap) - (current - heap); }
+block_header_t* get_free_list(void) { return free_list; }
+
 void reset_allocator(void) {
     current = heap;
     total_allocated = 0;
@@ -227,9 +231,6 @@ void reset_allocator(void) {
         size_classes[i] = NULL;
     }
 }
-
-size_t get_total_allocated(void) { return total_allocated; }
-size_t get_free_space(void) { return sizeof(heap) - (current - heap); }
 
 void print_heap_stats(void) {
     size_t used_heap = current - heap;

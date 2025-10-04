@@ -69,4 +69,6 @@ size_t get_total_allocated(void);
  */
 size_t get_free_space(void);
 
+block_header_t* get_free_list(void);
+
 #endif
