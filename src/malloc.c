@@ -50,7 +50,7 @@ static void push_to_class(block_header_t* block) {
 }
 
 void* my_malloc(size_t size) {
-    if (size == 0) return NULL;
+    if (size == 0) return NULL; 
     size = align_size(size);
     int class = get_size_class(size);
     if (class >= 0) {
