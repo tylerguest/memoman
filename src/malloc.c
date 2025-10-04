@@ -16,17 +16,14 @@
 
 #define ALIGNMENT 8
 #define COALESCE_THRESHOLD 50
-#define NUM_SIZE_CLASSES 8
+#define NUM_SIZE_CLASSES 12
 
 static char heap[1024 * 1024];
 static char* current = heap;
 static size_t total_allocated = 0;
 static int debug_output = 0;
-static int free_count = 0;
 static block_header_t* free_list = NULL;
-static block_header_t* size_classes[8] = {NULL};
-static const size_t class_sizes[8] = {16, 32, 64, 128, 256, 512, 1024, 2048};
-static void coalesce_free_blocks(void);
+static block_header_t* size_classes[12] = {NULL};
 
 // ============================================================================
 // UTILITIES
@@ -52,11 +49,19 @@ static block_header_t* user_to_header(void* ptr) {
 
 // Find size class index, or -1 if too large
 static int get_size_class(size_t size) {
-    for (int i = 0; i < NUM_SIZE_CLASSES; i++) {
-        if (size <= class_sizes[i]) {
-            return i;
-        }
-    }
+    // Unrolled for speed
+    if (size <= 16) return 0;
+    if (size <= 32) return 1;
+    if (size <= 64) return 2;
+    if (size <= 128) return 3;
+    if (size <= 256) return 4;
+    if (size <= 512) return 5;
+    if (size <= 1024) return 6;
+    if (size <= 2048) return 7;
+    if (size <= 4096) return 8;
+    if (size <= 8192) return 9;
+    if (size <= 16384) return 10;
+    if (size <= 32768) return 11;
     return -1;
 }
 
@@ -97,6 +102,28 @@ static void push_to_class(block_header_t* block) {
 }
 
 // ============================================================================
+// COALESCING (only for large blocks in free_list)
+// ============================================================================
+
+static void coalesce_free_list(void) {
+    if (free_list == NULL) return;
+
+    block_header_t* current = free_list;
+
+    while (current != NULL && current->next != NULL) {
+        // Check if blocks are physically adjacent
+        char* current_end = (char*)header_to_user(current) + current->size;
+
+        if ((char*)current->next == current_end) {
+            // Merge with next block
+            current->size += sizeof(block_header_t) + current->next->size;
+            current->next = current->next->next;
+            // Don't advanced - check if we can merge with new next
+        } else { current = current->next; }
+    }
+}
+
+// ============================================================================
 // ALLOCATION
 // ============================================================================
 
@@ -106,14 +133,14 @@ void* memomall(size_t size) {
     
     size = align_size(size);
     
-    // Try size class
+    // Fast path: try size class (O(1))
     int class = get_size_class(size);
     if (class >= 0) {
         void* ptr = pop_from_class(class);
         if (ptr) return ptr;
     }
     
-    // First-fit search
+    // Slow path: first-fit search
     block_header_t* prev = NULL;
     block_header_t* current_block = free_list;
     
@@ -154,6 +181,25 @@ void* memomall(size_t size) {
     size_t total_size = sizeof(block_header_t) + size;
     
     if (current + total_size > heap + sizeof(heap)) {
+        // Last resort: coalesce and try again
+        coalesce_free_list();
+
+        // Retry first-fit after coalescing
+        prev = NULL;
+        current_block = free_list;
+
+        while (current_block != NULL) {
+            if (current_block->size >= size) {
+                if (prev == NULL) { free_list = current_block->next; }
+                else { prev->next = current_block->next; }
+                current_block->is_free = 0;
+                current_block->next = NULL;
+                return header_to_user(current_block);
+            }
+            prev = current_block;
+            current_block = current_block->next;
+        }
+        // Truly out of memory 
         return NULL;
     }
     
@@ -165,9 +211,7 @@ void* memomall(size_t size) {
     current += total_size;
     total_allocated += total_size;
     
-    void* user_ptr = header_to_user(header);
-
-    return user_ptr;
+    return header_to_user(header);
 }
 
 // Free and trigger deferred coalescing
@@ -177,41 +221,9 @@ void memofree(void* ptr) {
     block_header_t* header = user_to_header(ptr);
     header->is_free = 1;
     
-    // Add to appropriate free list
+    // Simple: just push to appropriate list
+    // Coalescing happens lazily when needed
     push_to_class(header);
-    
-    // Coalesce periodically
-    if (++free_count >= COALESCE_THRESHOLD) {
-        coalesce_free_blocks();
-        free_count = 0;
-    }
-}
-
-// ============================================================================
-// DEFRAGMENTATION
-// ============================================================================
-
-// Merge adjacent free blocks in general free list
-static void coalesce_free_blocks(void) {
-    if (free_list == NULL) return;
-
-    block_header_t* current = free_list;
-    
-    while (current != NULL && current->next != NULL) {
-        block_header_t* next = current->next;
-        
-        // Check if physically adjacent
-        char* current_end = (char*)header_to_user(current) + current->size;
-        char* next_start = (char*)next;
-        
-        if (current_end == next_start) {
-            current->size += sizeof(block_header_t) + next->size;
-            current->next = next->next;
-            continue;
-        }
-        
-        current = current->next;
-    }
 }
 
 // ============================================================================
@@ -227,7 +239,7 @@ void reset_allocator(void) {
     total_allocated = 0;
     free_list = NULL;
     
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < NUM_SIZE_CLASSES; i++) {
         size_classes[i] = NULL;
     }
 }
