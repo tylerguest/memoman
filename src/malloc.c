@@ -14,13 +14,14 @@
 // CONFIGURATION
 // ============================================================================
 
-#define ALIGNMENT 32
+#define ALIGNMENT 8
 #define COALESCE_THRESHOLD 50
 #define NUM_SIZE_CLASSES 18
 
 static char heap[1024 * 1024];
 static char* current = heap;
 static size_t total_allocated = 0;
+static size_t free_count = 0;
 static block_header_t* free_list = NULL;
 static block_header_t* size_classes[18] = {NULL};
 
@@ -29,16 +30,16 @@ static block_header_t* size_classes[18] = {NULL};
 // ============================================================================
 
 // Round up to nearest multiple of ALIGNMENT
-static size_t align_size(size_t size) {
+static inline size_t align_size(size_t size) {
     return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
 }
 
 // Convert between header and user pointers
-static void* header_to_user(block_header_t* header) {
+static inline void* header_to_user(block_header_t* header) {
     return (char*)header + sizeof(block_header_t);
 }
 
-static block_header_t* user_to_header(void* ptr) {
+static inline block_header_t* user_to_header(void* ptr) {
     return (block_header_t*)((char*)ptr - sizeof(block_header_t));
 }
 
@@ -47,30 +48,44 @@ static block_header_t* user_to_header(void* ptr) {
 // ============================================================================
 
 // Find size class index, or -1 if too large
-static int get_size_class(size_t size) {
-    if (size <= 16) return 0;
-    if (size <= 24) return 1;    
-    if (size <= 32) return 2;
-    if (size <= 48) return 3;    
-    if (size <= 64) return 4;
-    if (size <= 96) return 5;    
-    if (size <= 128) return 6;
-    if (size <= 192) return 7;   
-    if (size <= 256) return 8;
-    if (size <= 512) return 9;
-    if (size <= 1024) return 10;
-    if (size <= 2048) return 11;
-    if (size <= 4096) return 12;
-    if (size <= 8192) return 13;
-    if (size <= 16384) return 14;
-    if (size <= 32768) return 15;
-    if (size <= 65536) return 16;
+static inline int get_size_class(size_t size) {
+    // Fast path for most common sizes
+    if (size <= 128) {
+        if (size <= 16) return 0;
+        if (size <= 24) return 1;
+        if (size <= 32) return 2;
+        if (size <= 48) return 3;
+        if (size <= 64) return 4;
+        if (size <= 96) return 5;
+        return 6;  // 128
+    }
+    
+    // Binary search for larger sizes
+    if (size <= 2048) {
+        if (size <= 192) return 7;
+        if (size <= 256) return 8;
+        if (size <= 512) return 9;
+        if (size <= 1024) return 10;
+        return 11;  // 2048
+    }
+    
+    if (size <= 16384) {
+        if (size <= 4096) return 12;
+        if (size <= 8192) return 13;
+        return 14;
+    }
+    
+    if (size <= 65536) {
+        if (size <= 32768) return 15;
+        return 16;
+    }
+    
     if (size <= 131072) return 17;
     return -1;
 }
 
 // O(1) allocation from size class
-static void* pop_from_class(int class) {
+static inline void* pop_from_class(int class) {
     if (class < 0 || class >= NUM_SIZE_CLASSES || !size_classes[class]) {
         return NULL;
     }
@@ -81,6 +96,49 @@ static void* pop_from_class(int class) {
     block->next = NULL;
     
     return header_to_user(block);
+}
+
+// ============================================================================
+// COALESCING
+// ============================================================================
+
+static inline void try_coalesce(block_header_t* header) {
+    char* block_end = (char*)header + sizeof(block_header_t) + header->size;
+    block_header_t* next = (block_header_t*)block_end;
+
+    if ((char*)next >= heap + sizeof(heap)) return;
+    if ((char*)next < heap) return;  // Safety check
+    if (!next->is_free) return;
+
+    // Only search size classes for the next block (faster than full free_list)
+    int next_class = get_size_class(next->size);
+    if (next_class >= 0) {
+        // Remove from size class
+        block_header_t** prev_ptr = &size_classes[next_class];
+        block_header_t* curr = size_classes[next_class];
+        while (curr != NULL) {
+            if (curr == next) {
+                *prev_ptr = curr->next;
+                header->size += sizeof(block_header_t) + next->size;
+                return;
+            }
+            prev_ptr = &curr->next;
+            curr = curr->next;
+        }
+    } else {
+        // Search free_list (same as before)
+        block_header_t** prev_ptr = &free_list;
+        block_header_t* curr = free_list;
+        while (curr != NULL) {
+            if (curr == next) {
+                *prev_ptr = curr->next;
+                header->size += sizeof(block_header_t) + next->size;
+                return;
+            }
+            prev_ptr = &curr->next;
+            curr = curr->next;
+        }
+    }
 }
 
 // ============================================================================
@@ -123,7 +181,7 @@ void* memomall(size_t size) {
             
             current_block->is_free = 0;
             current_block->next = NULL;
-            return header_to_user(current_block);  // ← ADD THIS RETURN!
+            return header_to_user(current_block);
         }
         
         prev_ptr = &current_block->next;
@@ -157,38 +215,21 @@ void memofree(void* ptr) {
     int class = get_size_class(header->size);
 
     if (class >= 0) {
-        // Small blocks : fast path, no coalescing needed
+        // Small blocks: fast path O(1)
         header->next = size_classes[class];
         size_classes[class] = header;
         return;
-    }
+    } else {
+        header->next = free_list;
+        free_list = header;
 
-    // Large blocks: check for adjacent free blocks
-    char* block_end = (char*)header + sizeof(block_header_t) + header->size;
-
-    // Try to merge with next block if it's free and adjacent
-    block_header_t* next = (block_header_t*)block_end;
-    if ((char*)next < heap + sizeof(heap) && next->is_free) {
-        // Remove next from free list first
-        block_header_t* curr = free_list;
-        block_header_t* prev = NULL;
-
-        while (curr != NULL && curr != next) {
-            prev = curr;
-            curr = curr->next;
-        }
-
-        if (curr == next) {
-            if (prev) prev->next = next->next;
-            else free_list = next->next;
-            
-            header->size += sizeof(block_header_t) + next->size;
+        // Coalesce periodically, not on every allocation
+        free_count++;
+        if (free_count >= COALESCE_THRESHOLD) {
+            free_count = 0;
+            try_coalesce(header);
         }
     }
-
-    // Insert into free list (LIFO)
-    header->next = free_list;
-    free_list = header;
 }
 
 // ============================================================================
