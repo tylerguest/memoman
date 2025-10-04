@@ -27,7 +27,6 @@ static block_header_t* free_list = NULL;
 static block_header_t* size_classes[8] = {NULL};
 static const size_t class_sizes[8] = {16, 32, 64, 128, 256, 512, 1024, 2048};
 static void coalesce_free_blocks(void);
-static void sort_free_list_by_address(void);
 
 // ============================================================================
 // UTILITIES
@@ -72,11 +71,6 @@ static void* pop_from_class(int class) {
     block->is_free = 0;
     block->next = NULL;
     
-    if (debug_output) {
-        printf("Fast allocation from class %d: %zu bytes at %p\n",
-               class, block->size, header_to_user(block));
-    }
-    
     return header_to_user(block);
 }
 
@@ -87,15 +81,19 @@ static void push_to_class(block_header_t* block) {
     if (class >= 0) {
         block->next = size_classes[class];
         size_classes[class] = block;
-        
-        if (debug_output) {
-            printf("Added block to size class %d: %zu bytes\n", class, block->size);
-        }
         return;
     }
     
-    block->next = free_list;
-    free_list = block;
+    // Inset into free_list in address order
+    if (free_list == NULL || block < free_list) {
+        block->next = free_list;
+        free_list = block;
+    } else {
+        block_header_t* current = free_list;
+        while (current->next != NULL && current->next < block) { current = current->next; }
+        block->next = current->next;
+        current->next = block;
+    }
 }
 
 // ============================================================================
@@ -112,9 +110,7 @@ void* memomall(size_t size) {
     int class = get_size_class(size);
     if (class >= 0) {
         void* ptr = pop_from_class(class);
-        if (ptr) {
-            return ptr;
-        }
+        if (ptr) return ptr;
     }
     
     // First-fit search
@@ -141,21 +137,11 @@ void* memomall(size_t size) {
                 new_block->is_free = 1;
                 push_to_class(new_block);
                 current_block->size = size;
-                
-                if (debug_output) {
-                    printf("Split block: used %zu bytes, created free block of %zu bytes\n",
-                           size, new_block->size);
-                }
             }
             
             current_block->is_free = 0;
             current_block->next = NULL;
             void* user_ptr = header_to_user(current_block);
-            
-            if (debug_output) {
-                printf("Reused block of %zu bytes (requested %zu) at %p\n",
-                       current_block->size, size, user_ptr);
-            }
             
             return user_ptr;
         }
@@ -168,7 +154,6 @@ void* memomall(size_t size) {
     size_t total_size = sizeof(block_header_t) + size;
     
     if (current + total_size > heap + sizeof(heap)) {
-        if (debug_output) printf("Out of memory!\n");
         return NULL;
     }
     
@@ -181,12 +166,7 @@ void* memomall(size_t size) {
     total_allocated += total_size;
     
     void* user_ptr = header_to_user(header);
-    
-    if (debug_output) {
-        printf("Allocated %zu bytes (+ %zu header) at %p\n",
-               size, sizeof(block_header_t), user_ptr);
-    }
-    
+
     return user_ptr;
 }
 
@@ -197,18 +177,8 @@ void memofree(void* ptr) {
     block_header_t* header = user_to_header(ptr);
     header->is_free = 1;
     
-    if (debug_output) {
-        printf("Freed block of %zu bytes at %p\n", header->size, ptr);
-    }
-    
     // Add to appropriate free list
-    int class = get_size_class(header->size);
-    if (class >= 0) {
-        push_to_class(header);
-    } else {
-        header->next = free_list;
-        free_list = header;
-    }
+    push_to_class(header);
     
     // Coalesce periodically
     if (++free_count >= COALESCE_THRESHOLD) {
@@ -224,13 +194,7 @@ void memofree(void* ptr) {
 // Merge adjacent free blocks in general free list
 static void coalesce_free_blocks(void) {
     if (free_list == NULL) return;
-    
-    if (debug_output) {
-        printf("Attempting to coalesce adjacent blocks...\n");
-    }
-    
-    sort_free_list_by_address();
-    
+
     block_header_t* current = free_list;
     
     while (current != NULL && current->next != NULL) {
@@ -241,13 +205,6 @@ static void coalesce_free_blocks(void) {
         char* next_start = (char*)next;
         
         if (current_end == next_start) {
-            if (debug_output) {
-                printf("Coalescing blocks: %zu + %zu = %zu bytes\n",
-                       current->size,
-                       sizeof(block_header_t) + next->size,
-                       current->size + sizeof(block_header_t) + next->size);
-            }
-            
             current->size += sizeof(block_header_t) + next->size;
             current->next = next->next;
             continue;
@@ -255,39 +212,6 @@ static void coalesce_free_blocks(void) {
         
         current = current->next;
     }
-}
-
-// Bubble sort free list by address (for coalescing)
-static void sort_free_list_by_address(void) {
-    if (free_list == NULL || free_list->next == NULL) return;
-    
-    int swapped;
-    do {
-        swapped = 0;
-        block_header_t* prev = NULL;
-        block_header_t* current = free_list;
-        
-        while (current != NULL && current->next != NULL) {
-            if (current > current->next) {
-                block_header_t* next = current->next;
-                
-                if (prev == NULL) {
-                    free_list = next;
-                } else {
-                    prev->next = next;
-                }
-                
-                current->next = next->next;
-                next->next = current;
-                
-                swapped = 1;
-                prev = next;
-            } else {
-                prev = current;
-                current = current->next;
-            }
-        }
-    } while (swapped);
 }
 
 // ============================================================================
@@ -302,19 +226,10 @@ void reset_allocator(void) {
     for (int i = 0; i < 8; i++) {
         size_classes[i] = NULL;
     }
-    
-    if (debug_output) {
-        printf("Allocator reset - all memory freed\n");
-    }
 }
 
-size_t get_total_allocated(void) {
-    return total_allocated;
-}
-
-size_t get_free_space(void) {
-    return sizeof(heap) - (current - heap);
-}
+size_t get_total_allocated(void) { return total_allocated; }
+size_t get_free_space(void) { return sizeof(heap) - (current - heap); }
 
 void print_heap_stats(void) {
     size_t used_heap = current - heap;
@@ -338,8 +253,7 @@ void print_free_list(void) {
     
     while (current != NULL) {
         if (debug_output) {
-            printf("Block %d: %zu bytes at %p\n",
-                   count++, current->size, (void*)current);
+            printf("Block %d: %zu bytes at %p\n", count++, current->size, (void*)current);
         }
         current = current->next;
     }
