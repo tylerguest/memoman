@@ -1,4 +1,4 @@
-#include "../src/malloc.h"
+#include "../src/memoman.h"
 #include <stdio.h>
 #include <assert.h>
 

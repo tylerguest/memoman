@@ -1,12 +1,14 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c99 -g
+LDFLAGS =
 DEBUG_FLAGS = -g -DDEBUG_OUTPUT
-BENCHMARK_FLAGS = -03 -march=native -DNDEBUG
+BENCHMARK_FLAGS = -O3 -march=native -DNDEBUG
 
 $(shell mkdir -p tests/bin)
 
-tests/bin/%: tests/%.c src/malloc.c src/malloc.h
-	$(CC) $(CFLAGS) -Isrc -o $@ src/malloc.c $<
+tests/bin/%: tests/%.c src/memoman.c src/memoman.h
+	mkdir -p tests/bin
+	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/memoman.c $<
 
 TEST_SOURCES = $(wildcard tests/test*.c)
 TESTS = $(patsubst tests/%.c,tests/bin/%,$(TEST_SOURCES))
@@ -16,6 +18,7 @@ all: $(TESTS)
 
 # Fast benchmark build (use this for performance testing)
 benchmark: CFLAGS += $(BENCHMARK_FLAGS)
+benchmark: LDFLAGS += -lrt
 benchmark: clean $(TESTS)
 	@echo "Built with optimizations for benchmarking"
 
@@ -46,5 +49,5 @@ run: all
 	    echo "$$failed test(s) failed"; \
 	    exit 1; \
 	fi	
-	
+
 .PHONY: all benchmark debug clean run

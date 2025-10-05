@@ -11,6 +11,7 @@ typedef struct block_header {
     size_t size;
     int is_free;
     struct block_header* next;
+    struct block_header* prev;
 } block_header_t;
 
 /**
