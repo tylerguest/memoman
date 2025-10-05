@@ -31,7 +31,7 @@ int main() {
 
     for (int t = 0; t < trials; t++) {
         printf("Trial %d/%d\n", t + 1, trials);
-        printf("  Testing your allocator...\n");
+        printf("  Testing memoman...\n");
         reset_allocator();
 
         double start = get_time();

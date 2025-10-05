@@ -1,0 +1,63 @@
+# Build artifacts
+build/
+bin/
+out/
+dist/
+.tmp/
+.cache/
+
+# Object files, libraries, executables
+*.o
+*.obj
+*.lo
+*.la
+*.a
+*.so
+*.dylib
+*.dll
+*.out
+*.exe
+a.out
+
+# Dependency files
+*.d
+
+# Coverage
+*.gcno
+*.gcda
+*.gcov
+coverage/
+lcov.info
+
+# Debug/symbols
+*.dSYM/
+*.su
+
+# Project-specific
+tests/bin/
+libmemoman.a
+
+# Logs
+*.log
+
+# Editors/IDE
+.vscode/
+.idea/
+.ccls-cache/
+.clangd/
+.cache/clangd/
+
+# OS/filesystem noise
+.DS_Store
+Thumbs.db
+
+# Backups/temps
+*~
+\#*\#
+*.swp
+*.swo
+*.tmp
+
+# Core dumps
+core
+core.*
