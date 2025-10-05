@@ -91,7 +91,3 @@ make benchmark
 - `DEBUG_OUTPUT` - Enable debug logging
 - `NDEBUG` - Disable assertions (benchmark mode)
 - `-O3 -march=native` - Optimization flags for benchmarking
-
-## License
-
-[Add your license here]
