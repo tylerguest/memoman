@@ -1,6 +1,6 @@
-# Memoman - Custom Memory Allocator
+# Memoman
 
-A custom memory allocator implementation in C.
+Custom memory allocator in C.
 
 ## Quick Setup
 
@@ -13,7 +13,7 @@ A custom memory allocator implementation in C.
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/tylerguest/memoman.git
 cd memoman
 
 # Build with debug output
