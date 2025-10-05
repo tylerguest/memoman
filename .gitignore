@@ -60,4 +60,15 @@ Thumbs.db
 
 # Core dumps
 core
-core.*
+core.*# Make sure .gitignore is committed
+git add .gitignore
+git commit -m "Add .gitignore"
+
+# Untrack all files, then re-add only those not ignored
+git rm -r --cached .
+git add -A
+git commit -m "Stop tracking files now ignored by .gitignore"
+
+# Push the cleanup
+git pull --rebase
+git push
