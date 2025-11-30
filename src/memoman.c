@@ -85,7 +85,6 @@ static inline void* pop_from_class(int class) {
   size_classes[class] = block->next;
   block->is_free = 0;
   block->next = NULL;
-  
   return header_to_user(block);
 }
 

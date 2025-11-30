@@ -16,13 +16,11 @@ TESTS = $(patsubst tests/%.c,tests/bin/%,$(TEST_SOURCES))
 all: CFLAGS += $(DEBUG_FLAGS)
 all: $(TESTS)
 
-# Fast benchmark build (use this for performance testing)
 benchmark: CFLAGS += $(BENCHMARK_FLAGS)
 benchmark: LDFLAGS += -lrt
 benchmark: clean $(TESTS)
 	@echo "Built with optimizations for benchmarking"
 
-# Debug build with output enabled
 debug: CFLAGS += $(DEBUG_FLAGS)
 debug: clean $(TESTS)
 	@echo "Built with debug output enabled"

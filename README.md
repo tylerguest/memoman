@@ -1,93 +1,79 @@
 # Memoman
 
-Custom memory allocator in C.
+Memoman is a small custom memory allocator written in C. Built as a learning project to explore how heap allocation works, including block headers, free lists, and basic coalescing. It also includes tests and micro-benchmarks for comparing allocator behavior.
 
-## Quick Setup
+## Features
 
-### Prerequisites
-- GCC compiler
-- Make
-- Linux/Unix system (uses POSIX features)
+- **Header-based block metadata (`block_header_t`)**
+- **Segregated free lists for fast allocation**
+- **Coalescing of adjacent free blocks**
+- **Unit tests and simple benchmarks**
 
-### Build
+## Build
 
 ```bash
-# Clone the repository
 git clone https://github.com/tylerguest/memoman.git
 cd memoman
-
-# Build with debug output
-make debug
-
-# Build optimized for benchmarking
-make benchmark
-
-# Build all tests (default with debug flags)
-make all
+make all         # build tests (default)
+make debug       # enable extra debug logging
+make benchmark   # optimized benchmark build
 ```
 
-## Usage
+## Testing
 
-### Run All Tests
 ```bash
-make run
+make run                # run all tests
+./tests/bin/test_*      # run individual tests
 ```
 
-### Run Individual Tests
-```bash
-# After building
-./tests/bin/test_benchmark
-./tests/bin/test_<other_test>
+## Benchmark (Example)
+
+```
+Your allocator:   0.211 s avg  (~47.38M ops/sec)
+System malloc:    1.029 s avg  (~9.72M ops/sec)
+Relative speed:   ~4.9× faster in this test
+
+(Results vary by hardware and compiler.)
 ```
 
-### API
+## API
 
 ```c
 #include "memoman.h"
 
-// Allocate memory
-void* ptr = memomall(size);
 
-// Free memory
-memofree(ptr);
+void* memomall(size_t size);
 
-// Reset allocator state
-reset_allocator();
+void memofree(void* ptr);
+
+void reset_allocator(void);
+
+void print_heap_stats(void);
+
+void print_free_list(void);
+
+size_t get_total_allocated(void);
+
+size_t get_free_space(void);
 ```
 
-## Project Structure
+## Design Overview
+
+- Each block stores a header before user data
+- Segregated free lists for small/medium blocks
+- First-fit fallback for larger blocks
+- Freeing triggers coalescing with neighbors
+
+## Structure
 
 ```
-memoman/
+.
+├── Makefile
 ├── src/
-│   ├── memoman.c      # Allocator implementation
-│   └── memoman.h      # Public API
-├── tests/
-│   ├── test_benchmark.c  # Performance benchmarks
-│   └── bin/           # Compiled test binaries
-├── Makefile           # Build configuration
-└── README.md
+│   ├── memoman.c
+│   └── memoman.h
+└── tests/
+	├── *.c
+	└── bin/
 ```
 
-## Build Targets
-
-- `make all` - Build all tests with debug flags
-- `make benchmark` - Build optimized for performance testing
-- `make debug` - Build with debug output enabled
-- `make clean` - Remove build artifacts
-- `make run` - Build and run all tests
-
-## Performance Testing
-
-The benchmark compares the custom allocator against system malloc:
-
-```bash
-make benchmark
-./tests/bin/test_benchmark
-```
-
-## Makefile Flags
-
-- `DEBUG_OUTPUT` - Enable debug logging
-- `NDEBUG` - Disable assertions (benchmark mode)
-- `-O3 -march=native` - Optimization flags for benchmarking
