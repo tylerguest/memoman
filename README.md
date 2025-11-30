@@ -1,6 +1,6 @@
 <img src="memoman.png" alt="Memoman" width=50% />
 
-memoman is a small custom memory allocator written in C. Built as a learning project to explore how heap allocation works, including block headers, free lists, and basic coalescing. It also includes tests and micro-benchmarks for comparing allocator behavior.
+memoman is a tiny custom memory allocator written in C. Built as a learning project to explore how heap allocation works, including block headers, free lists, and basic coalescing. It also includes tests and micro-benchmarks for comparing allocator behavior.
 
 ## Features
 
