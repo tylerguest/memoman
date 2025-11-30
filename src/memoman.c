@@ -11,8 +11,8 @@
 static char heap[1024 * 1024];
 static char* current = heap;
 static size_t total_allocated = 0;
-static block_header_t* free_list[NUM_FREE_LISTS] = {NULL};
-static block_header_t* size_classes[NUM_SIZE_CLASSES] = {NULL};
+static block_header_t* free_list[NUM_FREE_LISTS] = { NULL };
+static block_header_t* size_classes[NUM_SIZE_CLASSES] = { NULL };
 
 // **** Utilities ****
 
