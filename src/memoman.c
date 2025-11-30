@@ -1,9 +1,7 @@
 #include "memoman.h"
 #include <stdio.h>
 
-// ============================================================================
-// CONFIGURATION
-// ============================================================================
+// **** Configuration ****
 
 #define ALIGNMENT 8
 #define COALESCE_THRESHOLD 10
@@ -14,24 +12,24 @@ static char heap[1024 * 1024];
 static char* current = heap;
 static size_t total_allocated = 0;
 static block_header_t* free_list[NUM_FREE_LISTS] = {NULL};
-static block_header_t* size_classes[21] = {NULL};
+static block_header_t* size_classes[NUM_SIZE_CLASSES] = {NULL};
 
-// ============================================================================
-// UTILITIES
-// ============================================================================
+// **** Utilities ****
 
-// Round up to nearest multiple of ALIGNMENT
-static inline size_t align_size(size_t size) { return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1); }
+static inline size_t align_size(size_t size) { 
+  return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1); 
+}
 
-// Convert between header and user pointers
-static inline void* header_to_user(block_header_t* header) { return (char*)header + sizeof(block_header_t); }
-static inline block_header_t* user_to_header(void* ptr) { return (block_header_t*)((char*)ptr - sizeof(block_header_t)); }
+// *** convert between header and user pointers ***
+static inline void* header_to_user(block_header_t* header) { 
+  return (char*)header + sizeof(block_header_t); 
+}
+static inline block_header_t* user_to_header(void* ptr) { 
+  return (block_header_t*)((char*)ptr - sizeof(block_header_t)); 
+}
 
-// ============================================================================
-// SIZE CLASSES
-// ============================================================================
+// **** Size Classes ****
 
-// Find size class index, or -1 if too large
 static inline int get_size_class(size_t size) {
   if (size <= 128) {
     if (size <= 16) return 0;
@@ -40,7 +38,7 @@ static inline int get_size_class(size_t size) {
     if (size <= 48) return 3;
     if (size <= 64) return 4;
     if (size <= 96) return 5;
-    return 6;  // 128
+    return 6; 
   }
   
   if (size <= 2048) {
@@ -48,7 +46,7 @@ static inline int get_size_class(size_t size) {
     if (size <= 256) return 8;
     if (size <= 512) return 9;
     if (size <= 1024) return 10;
-    return 11;  // 2048
+    return 11;
   }
   
   if (size <= 16384) {
@@ -71,7 +69,7 @@ static inline int get_size_class(size_t size) {
 }
 
 static inline int get_free_list_index(size_t size) {
-  if (size <= 2048) return -1; // shouldn't happen
+  if (size <= 2048) return -1; 
   int index = 0;
   size_t min_size = 2048;
   while (min_size * 2 <= size && index < NUM_FREE_LISTS - 1) {
@@ -81,10 +79,8 @@ static inline int get_free_list_index(size_t size) {
   return index;
 }
 
-// O(1) allocation from size class
 static inline void* pop_from_class(int class) {
   if (class < 0 || class >= NUM_SIZE_CLASSES || !size_classes[class]) { return NULL; }
-  
   block_header_t* block = size_classes[class];
   size_classes[class] = block->next;
   block->is_free = 0;
@@ -93,25 +89,20 @@ static inline void* pop_from_class(int class) {
   return header_to_user(block);
 }
 
-// ============================================================================
-// ALLOCATION
-// ============================================================================
+// **** Allocation ****
 
 void* memomall(size_t size) {
   if (size == 0) return NULL;  
+
   size = align_size(size);  
 
-  // Fast path: try size class (O(1))
   int class = get_size_class(size);
-  
   if (class >= 0) {
     void* ptr = pop_from_class(class);
     if (ptr) return ptr;
   } 
 
-  // Slow path: best-fit search in appropriate free_list
   int list_index = get_free_list_index(size);
-  
   if (list_index >= 0) {
     block_header_t** prev_ptr = &free_list[list_index];
     block_header_t* current_block = free_list[list_index];
@@ -130,8 +121,7 @@ void* memomall(size_t size) {
 
     if (best_fit) {
       *best_prev = best_fit->next;  
-      
-      // Split if enough space remains
+
       size_t remaining_size = best_fit->size - size;
       size_t min_split_size = sizeof(block_header_t) + ALIGNMENT;  
       
@@ -153,10 +143,7 @@ void* memomall(size_t size) {
     }
   }  
 
-  // Fresh allocation
   size_t total_size = sizeof(block_header_t) + size;  
-
-  // Out of memory
   if (current + total_size > heap + sizeof(heap)) { return NULL; }  
   block_header_t* header = (block_header_t*)current;
   header->size = size;
@@ -175,13 +162,11 @@ void memofree(void* ptr) {
   int class = get_size_class(header->size);
 
   if (class >= 0) {
-    // Small blocks: O(1) push to size class
     header->next = size_classes[class];
     size_classes[class] = header;
     return;
   } 
 
-  // Large blocks: Insert into correct free_list (sorted by address for coalescing)
   int list_index = get_free_list_index(header->size);
   block_header_t* curr = free_list[list_index];
   block_header_t* prev = NULL;
@@ -195,14 +180,12 @@ void memofree(void* ptr) {
   if (prev) prev->next = header;
   else free_list[list_index] = header;  
   
-  // Coalesce with next block if possible
   char* block_end = (char*)header + sizeof(block_header_t) + header->size;
   block_header_t* next = (block_header_t*)block_end;
   
   if ((char*)next < heap + sizeof(heap) && next->is_free) {
     int next_list_index = get_free_list_index(next->size);
 
-    // Remove next from its free list
     block_header_t* next_curr = free_list[next_list_index];
     block_header_t* next_prev = NULL;
     
@@ -221,8 +204,6 @@ void memofree(void* ptr) {
     header->next = next->next;
   } 
 
-  // Coalesce with previous block if possible
-  // Scan free list for a block ending at header
   curr = free_list[list_index];
   prev = NULL;
   
@@ -232,7 +213,6 @@ void memofree(void* ptr) {
     if (curr_end == (char*)header && curr->is_free) {
       curr->size += sizeof(block_header_t) + header->size;
       curr->next = header->next;
-      // Remove header from free list
       if (prev) prev->next = curr;
       else free_list[list_index] = curr;
       break;
@@ -243,9 +223,7 @@ void memofree(void* ptr) {
   }
 }
 
-// ============================================================================
-// MANAGEMENT
-// ============================================================================
+// **** Management ****
 
 size_t get_total_allocated(void) { return total_allocated; }
 size_t get_free_space(void) { return sizeof(heap) - (current - heap); }
