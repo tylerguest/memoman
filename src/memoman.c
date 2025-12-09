@@ -1,5 +1,7 @@
 #include "memoman.h"
 #include <stdio.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 // **** Configuration ****
 
@@ -7,12 +9,33 @@
 #define COALESCE_THRESHOLD 10
 #define NUM_SIZE_CLASSES 21
 #define NUM_FREE_LISTS 8
+#define INITIAL_HEAP_SIZE (1024 * 1024)
+#define MAX_HEAP_SIZE (1024 * 1024 * 1024)
+#define HEAP_GROWTH_FACTOR 2
 
-static char heap[1024 * 1024];
-static char* current = heap;
+static char* heap = NULL;
+static char* current = NULL;
+static size_t heap_size = 0;
+static size_t heap_capacity = 0;
 static size_t total_allocated = 0;
 static block_header_t* free_list[NUM_FREE_LISTS] = { NULL };
 static block_header_t* size_classes[NUM_SIZE_CLASSES] = { NULL };
+
+int memoinit(void) {
+  if (heap != NULL) return 0;  // already initialized
+
+  heap = mmap(NULL, INITIAL_HEAP_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+  if (heap == MAP_FAILED) {
+    heap = NULL;
+    return -1;
+  }
+
+  heap_capacity = INITIAL_HEAP_SIZE;
+  current = heap;
+  heap_size = 0;
+  return 0;
+}
 
 // **** Utilities ****
 
