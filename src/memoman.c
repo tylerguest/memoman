@@ -6,8 +6,7 @@
 #include <unistd.h>
 #include <string.h>
 
-// **** Configuration ****
-
+/* Configuration */
 #define ALIGNMENT 8
 #define COALESCE_THRESHOLD 10
 #define NUM_SIZE_CLASSES 21
@@ -17,22 +16,21 @@
 #define HEAP_GROWTH_FACTOR 2
 #define LARGE_ALLOC_THRESHOLD (1024 * 1024) // 1MB
 
-static char* heap = NULL;
-static char* current = NULL;
+char* heap = NULL;
+char* current = NULL;
 static size_t heap_size = 0;
-static size_t heap_capacity = 0;
+size_t heap_capacity = 0;
 static size_t total_allocated = 0;
-static block_header_t* free_list[NUM_FREE_LISTS] = { NULL };
+block_header_t* free_list[NUM_FREE_LISTS] = { NULL };
 static block_header_t* size_classes[NUM_SIZE_CLASSES] = { NULL };
 static large_block_t* large_blocks = NULL;
 
-// **** Utilities ****
+/* Utilities */
 
 static inline size_t align_size(size_t size) { 
   return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1); 
 }
 
-// *** convert between header and user pointers ***
 static inline void* header_to_user(block_header_t* header) { 
   return (char*)header + sizeof(block_header_t); 
 }
@@ -40,8 +38,14 @@ static inline block_header_t* user_to_header(void* ptr) {
   return (block_header_t*)((char*)ptr - sizeof(block_header_t)); 
 }
 
-// **** Size Classes ****
+/* Size Classes */
 
+/*
+ * Maps allocation sizes to size class indices for 0(1) lookup.
+ * Size classes use power-of-2 and intermediate steps to balance
+ * memory efficienct with low fragmentation.
+ * Returns -1 for sizes exceeding 1MB (handled by free lists or direct mmap).
+ */
 static inline int get_size_class(size_t size) {
   if (size <= 128) {
     if (size <= 16) return 0;
@@ -80,6 +84,10 @@ static inline int get_size_class(size_t size) {
   return -1;  
 }
 
+/*
+ * Maps blocks >2KB to degregated free list indices.
+ * Returns -1 for blocks <=2KB (handled by size classes instead).
+ */
 static inline int get_free_list_index(size_t size) {
   if (size <= 2048) return -1; 
   int index = 0;
@@ -100,15 +108,21 @@ static inline void* pop_from_class(int class) {
   return header_to_user(block);
 }
 
-// **** Allocation ****
+/* Allocation */
 
+/*
+ * Reserve-then-commit strategy: reserves 1GB address space but only commits
+ * initial 1MB as PROT_READ | PROT_WRITE. Heap grows via mprotect (not mremap)
+ * to prevent address changes that would invalidate user pointers.
+ */
 int memoinit(void) {
-  if (heap != NULL) return 0;  // already initialized
+  if (heap != NULL) return 0;  
 
   heap = mmap(NULL, MAX_HEAP_SIZE, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 
   if (heap == MAP_FAILED) {
     heap = NULL;
+    return -1;
   }
 
   if (mprotect(heap, INITIAL_HEAP_SIZE, PROT_READ | PROT_WRITE) != 0) {
@@ -132,11 +146,14 @@ void memodestroy(void) {
     current = NULL;
   }
 
-  // clean up free lists
   for (int i = 0; i < NUM_FREE_LISTS; i++) free_list[i] = NULL;
   for (int i = 0; i < NUM_SIZE_CLASSES; i++) size_classes[i] = NULL;
 }
 
+/*
+ * Expands heap capacity by doubling (or more if needed).
+ * Uses mprotect on pre-reserved address space to avoid heap relocation.
+ */
 static int grow_heap(size_t min_additional) {
   size_t new_capacity = heap_capacity * HEAP_GROWTH_FACTOR;
   while (new_capacity < heap_capacity + min_additional) { new_capacity *= HEAP_GROWTH_FACTOR; }
@@ -149,12 +166,18 @@ static int grow_heap(size_t min_additional) {
   return 0;
 }
 
+/*
+ * Four-tier allocation strategy:
+ * 1. Large blocks (>=1MB): direct mmap to avoid fragmenting main heap
+ * 2. Size classes (<=2KB): 0(1) exact-fit from segregated lists
+ * 3. Free lists (>2KB): best-fit with splitting to minimize waste
+ * 4. Bump allocation: linear allocation from heap top
+ */
 void* memomall(size_t size) {
-  // lazy initialization
   if (heap == NULL) { if (memoinit() != 0) return NULL; }
   if (size == 0) return NULL;  
 
-  // large allocations: direct mmap
+  // bypass allocator for large blocks to prevent fragmentation
   if (size >= LARGE_ALLOC_THRESHOLD) {
     size_t total_size = sizeof(large_block_t) + align_size(size);
     void* ptr = mmap(NULL, total_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -199,6 +222,7 @@ void* memomall(size_t size) {
       size_t remaining_size = best_fit->size - size;
       size_t min_split_size = sizeof(block_header_t) + ALIGNMENT;  
       
+      // split block only if remainder is usable
       if (remaining_size >= min_split_size) {
         char* split_point = (char*)header_to_user(best_fit) + size;
         block_header_t* new_block = (block_header_t*)split_point;
@@ -219,10 +243,7 @@ void* memomall(size_t size) {
 
   size_t total_size = sizeof(block_header_t) + size;  
   
-  if (current + total_size > heap + heap_capacity) { 
-    // try to grow heap
-    if (grow_heap(total_size) != 0) { return NULL; }
-  }  
+  if (current + total_size > heap + heap_capacity) {  if (grow_heap(total_size) != 0) { return NULL; } }  
   
   block_header_t* header = (block_header_t*)current;
   header->size = size;
@@ -234,10 +255,15 @@ void* memomall(size_t size) {
   return header_to_user(header);
 }
 
+/*
+ * Returns blocks to appropriate free list (or size class for small blocks).
+ * Performs forward and backward coalescing to reduce fragmentation.
+ * Large blocks (>=1MB) are unmapped immediately.
+ */
 void memofree(void* ptr) {
   if (ptr == NULL) return;
   
-  // check if large allocation
+  // check if this is a large allocation that should be unmapped
   large_block_t** large_prev = &large_blocks;
   large_block_t* large_curr = large_blocks;
 
@@ -261,6 +287,7 @@ void memofree(void* ptr) {
     return;
   } 
 
+  // insert into free list sorted by address for efficient coalescing
   int list_index = get_free_list_index(header->size);
   block_header_t* curr = free_list[list_index];
   block_header_t* prev = NULL;
@@ -274,11 +301,11 @@ void memofree(void* ptr) {
   if (prev) prev->next = header;
   else free_list[list_index] = header;  
   
-  // forward coalescing - CHECK BOUNDS FIRST
+  // forward coalescing: merge with physically adjacent next block
   char* block_end = (char*)header + sizeof(block_header_t) + header->size;
   block_header_t* next = (block_header_t*)block_end;
   
-  // verify next block is withing our heap and is valid
+  // bounds check required because block_end could be at heap boundary
   if (heap != NULL &&
       (char*)next >= heap &&
       (char*)next < heap + heap_capacity &&
@@ -302,7 +329,7 @@ void memofree(void* ptr) {
     header->next = next->next;
   }
   
-  // backward coalescing
+  // backward coalescing: merge with physically adjacent previous block
   curr = free_list[list_index];
   prev = NULL;
   
@@ -322,21 +349,19 @@ void memofree(void* ptr) {
   }
 }
 
-// **** Management ****
+/* Management */
 
 size_t get_total_allocated(void) { return total_allocated; }
 size_t get_free_space(void) { return heap_capacity - (current - heap); }
 block_header_t* get_free_list(void) { return free_list[0]; }
 
 void reset_allocator(void) {
-  // free large blocks
   while (large_blocks) {
     large_block_t* next = large_blocks->next;
     munmap(large_blocks, large_blocks->size);
     large_blocks = next;
   }
 
-  // reset main heap
   if (heap) {
     current = heap;
     heap_size = 0;
@@ -344,36 +369,4 @@ void reset_allocator(void) {
     for (int i = 0; i < NUM_FREE_LISTS; i++) free_list[i] = NULL;
     for (int i = 0; i < NUM_SIZE_CLASSES; i++) size_classes[i] = NULL;
   }
-
-}
-
-void print_heap_stats(void) {
-#ifdef DEBUG_OUTPUT
-  if (heap == NULL) return;
-  size_t used_heap = current - heap;
-  size_t free_heap = heap_capacity - used_heap;
-  printf("\n=== Heap Statistics ===\n");
-  printf("Total heap size: %zu bytes (%.2f MB)\n", heap_capacity, heap_capacity / (1024.0 * 1024.0));
-  printf("Used heap space: %zu bytes\n", used_heap);
-  printf("Free heap space: %zu bytes\n", free_heap);
-  printf("Usage: %.1f%%\n", (double)used_heap / heap_capacity * 100);
-  printf("====================\n\n");
-#endif
-}
-
-void print_free_list(void) {
-#ifdef DEBUG_OUTPUT
-  printf("\n=== Free List ===\n");
-  for (int i = 0; i < NUM_FREE_LISTS; i++) {
-    printf("Free List %d:\n", i);
-    block_header_t* current_block = free_list[i];
-    int count = 0;
-    while (current_block != NULL) {
-      printf("  Block %d: %zu bytes at %p\n", count++, current_block->size, (void*)current_block);
-      current_block = current_block->next;
-    }
-    if (count == 0) printf("  Empty\n");
-  }
-  printf("====================\n\n");
-#endif
 }

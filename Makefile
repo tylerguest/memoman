@@ -6,9 +6,9 @@ BENCHMARK_FLAGS = -O3 -march=native -DNDEBUG
 
 $(shell mkdir -p tests/bin)
 
-tests/bin/%: tests/%.c src/memoman.c src/memoman.h
+tests/bin/%: tests/%.c src/memoman.c src/mmdebug.c src/memoman.h
 	mkdir -p tests/bin
-	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/memoman.c $<
+	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/memoman.c  src/mmdebug.c $<
 
 TEST_SOURCES = $(wildcard tests/test*.c)
 TESTS = $(patsubst tests/%.c,tests/bin/%,$(TEST_SOURCES))
