@@ -19,7 +19,7 @@ double get_time() {
 int main() {
   printf("=== Allocator Benchmark Comparison ===\n");  
   
-  const int iterations = 10000000;  
+  const int iterations = 1000000;  
   const int trials = 5;
   
   printf("Testing %d operations per trial, %d trials...\n\n", iterations, trials);  

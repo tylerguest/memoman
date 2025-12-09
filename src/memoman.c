@@ -1,7 +1,10 @@
+#define _GNU_SOURCE
+
 #include "memoman.h"
 #include <stdio.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <string.h>
 
 // **** Configuration ****
 
@@ -12,6 +15,7 @@
 #define INITIAL_HEAP_SIZE (1024 * 1024)
 #define MAX_HEAP_SIZE (1024 * 1024 * 1024)
 #define HEAP_GROWTH_FACTOR 2
+#define LARGE_ALLOC_THRESHOLD (1024 * 1024) // 1MB
 
 static char* heap = NULL;
 static char* current = NULL;
@@ -20,22 +24,7 @@ static size_t heap_capacity = 0;
 static size_t total_allocated = 0;
 static block_header_t* free_list[NUM_FREE_LISTS] = { NULL };
 static block_header_t* size_classes[NUM_SIZE_CLASSES] = { NULL };
-
-int memoinit(void) {
-  if (heap != NULL) return 0;  // already initialized
-
-  heap = mmap(NULL, INITIAL_HEAP_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-
-  if (heap == MAP_FAILED) {
-    heap = NULL;
-    return -1;
-  }
-
-  heap_capacity = INITIAL_HEAP_SIZE;
-  current = heap;
-  heap_size = 0;
-  return 0;
-}
+static large_block_t* large_blocks = NULL;
 
 // **** Utilities ****
 
@@ -113,8 +102,71 @@ static inline void* pop_from_class(int class) {
 
 // **** Allocation ****
 
+int memoinit(void) {
+  if (heap != NULL) return 0;  // already initialized
+
+  heap = mmap(NULL, MAX_HEAP_SIZE, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+
+  if (heap == MAP_FAILED) {
+    heap = NULL;
+  }
+
+  if (mprotect(heap, INITIAL_HEAP_SIZE, PROT_READ | PROT_WRITE) != 0) {
+    munmap(heap, MAX_HEAP_SIZE);
+    heap = NULL;
+    return -1;
+  }
+
+  heap_capacity = INITIAL_HEAP_SIZE;
+  current = heap;
+  heap_size = 0;
+  return 0;
+}
+
+void memodestroy(void) {
+  if (heap != NULL) {
+    munmap(heap, heap_capacity);
+    heap = NULL;
+    heap_capacity = 0;
+    heap_size = 0;
+    current = NULL;
+  }
+
+  // clean up free lists
+  for (int i = 0; i < NUM_FREE_LISTS; i++) free_list[i] = NULL;
+  for (int i = 0; i < NUM_SIZE_CLASSES; i++) size_classes[i] = NULL;
+}
+
+static int grow_heap(size_t min_additional) {
+  size_t new_capacity = heap_capacity * HEAP_GROWTH_FACTOR;
+  while (new_capacity < heap_capacity + min_additional) { new_capacity *= HEAP_GROWTH_FACTOR; }
+  if (new_capacity > MAX_HEAP_SIZE) { new_capacity = MAX_HEAP_SIZE; }
+  if (new_capacity <= heap_capacity) { return -1; } // can't grow further
+  
+  if (mprotect(heap, new_capacity, PROT_READ | PROT_WRITE) != 0) { return -1; }
+  
+  heap_capacity = new_capacity;
+  return 0;
+}
+
 void* memomall(size_t size) {
+  // lazy initialization
+  if (heap == NULL) { if (memoinit() != 0) return NULL; }
   if (size == 0) return NULL;  
+
+  // large allocations: direct mmap
+  if (size >= LARGE_ALLOC_THRESHOLD) {
+    size_t total_size = sizeof(large_block_t) + align_size(size);
+    void* ptr = mmap(NULL, total_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (ptr == MAP_FAILED) return NULL;
+
+    large_block_t* block = (large_block_t*)ptr;
+    block->size = total_size;
+    block->next = large_blocks;
+    large_blocks = block;
+
+    return (char*)ptr + sizeof(large_block_t);
+  }
 
   size = align_size(size);  
 
@@ -166,18 +218,38 @@ void* memomall(size_t size) {
   }  
 
   size_t total_size = sizeof(block_header_t) + size;  
-  if (current + total_size > heap + sizeof(heap)) { return NULL; }  
+  
+  if (current + total_size > heap + heap_capacity) { 
+    // try to grow heap
+    if (grow_heap(total_size) != 0) { return NULL; }
+  }  
+  
   block_header_t* header = (block_header_t*)current;
   header->size = size;
   header->is_free = 0;
   header->next = NULL;  
   current += total_size;
   total_allocated += total_size;  
+  
   return header_to_user(header);
 }
 
 void memofree(void* ptr) {
-  if (ptr == NULL) return;  
+  if (ptr == NULL) return;
+  
+  // check if large allocation
+  large_block_t** large_prev = &large_blocks;
+  large_block_t* large_curr = large_blocks;
+
+  while(large_curr) {
+    if ((char*)large_curr + sizeof(large_block_t) == ptr) {
+      *large_prev = large_curr->next;
+      munmap(large_curr, large_curr->size);
+      return;
+    }
+    large_prev = &large_curr->next;
+    large_curr = large_curr->next;
+  }
 
   block_header_t* header = user_to_header(ptr);
   header->is_free = 1;  
@@ -202,15 +274,21 @@ void memofree(void* ptr) {
   if (prev) prev->next = header;
   else free_list[list_index] = header;  
   
+  // forward coalescing - CHECK BOUNDS FIRST
   char* block_end = (char*)header + sizeof(block_header_t) + header->size;
   block_header_t* next = (block_header_t*)block_end;
   
-  if ((char*)next < heap + sizeof(heap) && next->is_free) {
+  // verify next block is withing our heap and is valid
+  if (heap != NULL &&
+      (char*)next >= heap &&
+      (char*)next < heap + heap_capacity &&
+      (char*)next + sizeof(block_header_t) <= heap + heap_capacity &&
+      next->is_free) {
     int next_list_index = get_free_list_index(next->size);
 
     block_header_t* next_curr = free_list[next_list_index];
     block_header_t* next_prev = NULL;
-    
+
     while (next_curr) {
       if (next_curr == next) {
         if (next_prev) next_prev->next = next_curr->next;
@@ -219,13 +297,12 @@ void memofree(void* ptr) {
       }
       next_prev = next_curr;
       next_curr = next_curr->next;
-    
     }
-    
     header->size += sizeof(block_header_t) + next->size;
     header->next = next->next;
-  } 
-
+  }
+  
+  // backward coalescing
   curr = free_list[list_index];
   prev = NULL;
   
@@ -248,27 +325,38 @@ void memofree(void* ptr) {
 // **** Management ****
 
 size_t get_total_allocated(void) { return total_allocated; }
-size_t get_free_space(void) { return sizeof(heap) - (current - heap); }
+size_t get_free_space(void) { return heap_capacity - (current - heap); }
 block_header_t* get_free_list(void) { return free_list[0]; }
 
 void reset_allocator(void) {
-  current = heap;
-  total_allocated = 0;
-  
-  for (int i = 0; i < NUM_FREE_LISTS; i++) free_list[i] = NULL;
-  for (int i = 0; i < NUM_SIZE_CLASSES; i++) size_classes[i] = NULL;
+  // free large blocks
+  while (large_blocks) {
+    large_block_t* next = large_blocks->next;
+    munmap(large_blocks, large_blocks->size);
+    large_blocks = next;
+  }
+
+  // reset main heap
+  if (heap) {
+    current = heap;
+    heap_size = 0;
+
+    for (int i = 0; i < NUM_FREE_LISTS; i++) free_list[i] = NULL;
+    for (int i = 0; i < NUM_SIZE_CLASSES; i++) size_classes[i] = NULL;
+  }
 
 }
 
 void print_heap_stats(void) {
 #ifdef DEBUG_OUTPUT
+  if (heap == NULL) return;
   size_t used_heap = current - heap;
-  size_t free_heap = sizeof(heap) - used_heap;
+  size_t free_heap = heap_capacity - used_heap;
   printf("\n=== Heap Statistics ===\n");
-  printf("Total heap size: %zu bytes (%.2f MB)\n", sizeof(heap), sizeof(heap) / (1024.0 * 1024.0));
+  printf("Total heap size: %zu bytes (%.2f MB)\n", heap_capacity, heap_capacity / (1024.0 * 1024.0));
   printf("Used heap space: %zu bytes\n", used_heap);
   printf("Free heap space: %zu bytes\n", free_heap);
-  printf("Usage: %.1f%%\n", (double)used_heap / sizeof(heap) * 100);
+  printf("Usage: %.1f%%\n", (double)used_heap / heap_capacity * 100);
   printf("====================\n\n");
 #endif
 }

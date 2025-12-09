@@ -11,8 +11,23 @@ typedef struct block_header {
     size_t size;
     int is_free;
     struct block_header* next;
-    struct block_header* prev;
 } block_header_t;
+
+typedef struct large_block {
+  size_t size;
+  struct large_block* next;
+} large_block_t;
+
+/**
+ * Initialize the allocator (optional - called automatically)
+ * @return 0 on success, -1 on failure
+ */
+int memoinit(void);
+
+/**
+ * Cleanup and free all memory
+ */
+void memodestroy(void);
 
 /**
  * Allocate memory from the custom heap
