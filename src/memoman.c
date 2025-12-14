@@ -20,7 +20,13 @@
 #define MAX_HEAP_SIZE (1024 * 1024 * 1024)
 #define HEAP_GROWTH_FACTOR 2
 
+/* TLSF Control */
+static tlsf_control_t* tlsf_ctrl = NULL;
 
+/* Large block tracking */
+static large_block_t* large_blocks = NULL;
+
+/* Legacy globals - to be removed*/
 char* heap = NULL;
 char* current = NULL;
 static size_t heap_size = 0;
@@ -28,7 +34,7 @@ size_t heap_capacity = 0;
 static size_t total_allocated = 0;
 block_header_t* free_list[NUM_FREE_LISTS] = { NULL };
 static block_header_t* size_classes[NUM_SIZE_CLASSES] = { NULL };
-static large_block_t* large_blocks = NULL;
+
 
 /* Utilities */
 static inline size_t align_size(size_t size) { 
@@ -42,7 +48,181 @@ static inline block_header_t* user_to_header(void* ptr) {
   return (block_header_t*)((char*)ptr - sizeof(block_header_t)); 
 }
 
-/* Size Classes */
+/* TLSF Bit Manipulation Functions*/
+
+/* 
+ * Find Last Set (FLS) - position of most significant bit
+ * Uses GCC/Clang builtin. For other compilers, implement manual bit scan
+ */
+static inline int fls_generic(size_t word) { return (sizeof(size_t) * 8) - 1- __builtin_clzl(word); }
+
+/*
+ * Find First Set (FFS) - position of least significant bit
+ * Returns 0-based index, or -1 if not bits set
+ */
+static inline int ffs_generic(uint32_t word) {
+  int result = __builtin_ffs(word);
+  return result ? result - 1 :  -1;
+}
+
+/*
+ * Maps allocation size to first-level index (FLI)
+ * FLI represents the power-of-2 class: log2(size)
+ */
+static inline int mapping_fli(size_t size) { return fls_generic(size); }
+
+/*
+ * Maps allocation size to second-level index (SLI)
+ * SLI subdividese the FLI range into TLSF_SLI_COUNT bins
+ * Extracts the next TLSF_SLI bits after the MSB
+ */
+static inline int mapping_sli(size_t size, int fl) { return (int)((size >> (fl - TLSF_SLI)) & (TLSF_SLI_COUNT -1 )); }
+
+/*
+ * Combined mapping function
+ * Maps size to first-level and second-level indices
+ * Handles mininum block size by adjusting FLI
+ */
+static inline void mapping(size_t size, int* fl, int* sl) {
+  if (size < TLSF_MIN_BLOCK_SIZE) {
+    *fl = 0;
+    *sl = 0;
+  } else {
+    *fl = mapping_fli(size);
+    *sl = mapping_sli(size, *fl);
+    *fl -= TLSF_FLI_OFFSET;  // adjust for some mininum block size
+  }
+}
+
+/* TLSF Bitmap Operations */
+
+/*
+ * Set bit in first-level bitmap when list becomes non-empty
+ */
+static inline void set_fl_bit(tlsf_control_t* ctrl, int fl) { ctrl->fl_bitmap |= (1U << fl); }
+
+/*
+ * Set bit in second-level bitmap when list becomes empty
+ */
+static inline void set_sl_bit(tlsf_control_t* ctrl, int fl, int sl) { ctrl->sl_bitmap[fl] |= (1U << sl); }
+
+/*
+ * Clear bit in first-level bitmap when list becomes empty
+ */
+static inline void clear_fl_bit(tlsf_control_t* ctrl, int fl) { ctrl->fl_bitmap &= ~(1U << fl); }
+
+
+/*
+ * Clear bit in second-level bitmap when list becomes empty
+ */
+static inline void clear_sl_bit(tlsf_control_t* ctrl, int fl, int sl) { ctrl->sl_bitmap[fl] &= ~(1U << sl); }
+
+/*
+ * Find next non-empty first-level list at or after fl
+ * Uses bitmap mask and FFS for 0(1) search
+ * Returns -1 if no suitable list found
+ */
+static inline int find_suitable_fl(tlsf_control_t* ctrl, int fl) {
+  uint32_t mask = ctrl->fl_bitmap & (~0U << fl);
+  return mask ? ffs_generic(mask) : -1;
+}
+
+/*
+ * Find next non-empty second-level list at or after sl
+ * Uses bitmap mask and FFS for 0(1) search
+ * Returns -1 if no suitable list found
+ */
+static inline int find_suitable_sl(tlsf_control_t* ctrl, int fl, int sl) {
+  uint32_t mask = ctrl->sl_bitmap[fl] & (~0U << sl);
+  return mask ? ffs_generic(mask) : -1;
+}
+
+/* TLSF Block Utility Functions */
+
+/*
+ * Extract block size without flags
+ * Size field stores size in upper bits, flags in lower 2 bits
+ */
+static inline size_t block_size(tlsf_block_t* block) { return block->size & TLSF_SIZE_MASK; }
+
+/*
+ * Check if block is free
+ */
+static inline int block_is_free(tlsf_block_t* block) { return block->size & TLSF_BLOCK_FREE; }
+
+/*
+ * Check if previous physical block is free
+ */
+static inline int block_is_prev_free(tlsf_block_t* block) { return block->size & TLSF_PREV_FREE; }
+
+/*
+ * Mark block as free (set flag)
+ */
+static inline void block_set_free(tlsf_block_t* block) { block->size |= TLSF_BLOCK_FREE; }
+
+/*
+ * Mark block as used (clear free flag)
+ */
+static inline void block_set_used(tlsf_block_t* block) { block->size &= ~TLSF_BLOCK_FREE; }
+
+/*
+ * Mark previous physical block as free
+ */
+static inline void block_set_prev_free(tlsf_block_t* block) { block->size |= TLSF_PREV_FREE; }
+
+/*
+ * Mark previous physical block as used
+ */
+static inline void block_set_prev_used(tlsf_block_t* block) { block->size &= ~TLSF_PREV_FREE; }
+
+/* TLSF Block Navigation */
+
+/*
+ * Get next physical block
+ * Advances point by block header size plus blocks's data size
+ */
+static inline tlsf_block_t* block_next(tlsf_block_t* block) { return (tlsf_block_t*)((char*)block + sizeof(tlsf_block_t) + block_size(block)); }
+
+/*
+ * Get previous physical block using boundary tag
+ */
+static inline tlsf_block_t* block_prev(tlsf_block_t* block) { return block->prev_phys; }
+
+/*
+ * Convert block header to user pointer
+ * User data starts immediately after block header
+ */
+static inline void* block_to_user(tlsf_block_t* block) { return (char*)block + sizeof(tlsf_block_t); }
+
+/*
+ * Convert user pointer to block header
+ */
+static inline void* user_to_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - sizeof(tlsf_block_t)); }
+
+/* TLSF Block Metadata Helpers */
+
+/*
+ * Set block size while preserving flags
+ * Clears old size bits, keeps flag bits, set new size
+ */
+static inline void block_set_size(tlsf_block_t* block, size_t size) {
+  size_t flags = block->size & ~TLSF_SIZE_MASK;
+  block->size = size | flags;
+}
+
+/*
+ * Mark block as free and update next block's prev_free flag
+ * This is the proper way to free a block in TLSF
+ */
+static inline void block_mark_as_free(tlsf_block_t* block) {
+  block_set_free(block);
+
+  /* Update next block's prev_free flag */
+  tlsf_block_t* next = block_next(block);
+  if (next) { block_set_prev_used(next); }
+}
+
+/* Size Classes - to be removed */
 
 /*
  * Maps allocation sizes to size class indices for 0(1) lookup.
