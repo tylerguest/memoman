@@ -8,13 +8,18 @@
 
 /* Configuration */
 #define ALIGNMENT 8
+#define LARGE_ALLOC_THRESHOLD (1024 * 1024)
+
+/* Legacy - to be removed */
 #define COALESCE_THRESHOLD 10
 #define NUM_SIZE_CLASSES 21
 #define NUM_FREE_LISTS 8
+
+/* Heap management */
 #define INITIAL_HEAP_SIZE (1024 * 1024)
 #define MAX_HEAP_SIZE (1024 * 1024 * 1024)
 #define HEAP_GROWTH_FACTOR 2
-#define LARGE_ALLOC_THRESHOLD (1024 * 1024) // 1MB
+
 
 char* heap = NULL;
 char* current = NULL;
