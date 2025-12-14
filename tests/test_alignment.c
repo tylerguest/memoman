@@ -6,13 +6,13 @@ void test_alignment() {
   printf("=== Testing Memory Alignment ===\n\n");
   
   printf("1. Testing different allocation sizes:\n");
-  void* ptr1 = memomall(1);   
-  void* ptr2 = memomall(7);   
-  void* ptr3 = memomall(8);   
-  void* ptr4 = memomall(9);   
-  void* ptr5 = memomall(13);  
-  void* ptr6 = memomall(16);  
-  void* ptr7 = memomall(17);  
+  void* ptr1 = mm_malloc(1);   
+  void* ptr2 = mm_malloc(7);   
+  void* ptr3 = mm_malloc(8);   
+  void* ptr4 = mm_malloc(9);   
+  void* ptr5 = mm_malloc(13);  
+  void* ptr6 = mm_malloc(16);  
+  void* ptr7 = mm_malloc(17);  
   printf("\n");
   
   printf("2. Checking address alignment:\n");
@@ -26,8 +26,8 @@ void test_alignment() {
   printf("\n");
   
   printf("4. Testing actual memory usage:\n");
-  char* str1 = (char*)memomall(10);  // 16 bytes
-  char* str2 = (char*)memomall(5);   // 8 bytes
+  char* str1 = (char*)mm_malloc(10);  // 16 bytes
+  char* str2 = (char*)mm_malloc(5);   // 8 bytes
   strcpy(str1, "Hello!");
   strcpy(str2, "World!");
   printf("String 1: %s\n", str1);

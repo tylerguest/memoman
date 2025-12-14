@@ -39,14 +39,14 @@ double test_memoman(int N, int iterations) {
   for (int iter = 0; iter < iterations; iter++) {
     reset_allocator();
     
-    double** A = (double**)memomall(N * sizeof(double*));
-    double** B = (double**)memomall(N * sizeof(double*));
-    double** C = (double**)memomall(N * sizeof(double*));
+    double** A = (double**)mm_malloc(N * sizeof(double*));
+    double** B = (double**)mm_malloc(N * sizeof(double*));
+    double** C = (double**)mm_malloc(N * sizeof(double*));
     
     for (int i = 0; i < N; i++) {
-        A[i] = (double*)memomall(N * sizeof(double));
-        B[i] = (double*)memomall(N * sizeof(double));
-        C[i] = (double*)memomall(N * sizeof(double));
+        A[i] = (double*)mm_malloc(N * sizeof(double));
+        B[i] = (double*)mm_malloc(N * sizeof(double));
+        C[i] = (double*)mm_malloc(N * sizeof(double));
     }
     
     init_matrix(A, N);
@@ -55,13 +55,13 @@ double test_memoman(int N, int iterations) {
     multiply_matrices(A, B, C, N);
     
     for (int i = 0; i < N; i++) {
-        memofree(A[i]);
-        memofree(B[i]);
-        memofree(C[i]);
+        mm_free(A[i]);
+        mm_free(B[i]);
+        mm_free(C[i]);
     }
-    memofree(A);
-    memofree(B);
-    memofree(C);
+    mm_free(A);
+    mm_free(B);
+    mm_free(C);
   }
   
   double end = get_time();

@@ -41,8 +41,8 @@ Relative speed:   ~4.9× faster in this test
 ```c
 #include "memoman.h"
 
-void* memomall(size_t size);
-void memofree(void* ptr);
+void* mm_malloc(size_t size);
+void mm_free(void* ptr);
 void reset_allocator(void);
 void print_heap_stats(void);
 void print_free_list(void);

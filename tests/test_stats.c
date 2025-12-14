@@ -9,9 +9,9 @@ int main() {
   print_heap_stats();  
   
   printf("2. After allocations:\n");
-  char* ptr1 = (char*)memomall(100);
-  char* ptr2 = (char*)memomall(100);
-  int*  ptr3 = (int*)memomall(sizeof(int) * 50);  
+  char* ptr1 = (char*)mm_malloc(100);
+  char* ptr2 = (char*)mm_malloc(100);
+  int*  ptr3 = (int*)mm_malloc(sizeof(int) * 50);  
   print_heap_stats();  
   
   printf("3. Individual function tests:\n");
@@ -29,8 +29,8 @@ int main() {
   printf("\n");  
   
   printf("\n5. After more allocations:\n");
-  memomall(1000);   // 1KB
-  memomall(5000);   // 5KB  
+  mm_malloc(1000);   // 1KB
+  mm_malloc(5000);   // 5KB  
   print_heap_stats();  
   
   printf("=== Test Complete ===\n");

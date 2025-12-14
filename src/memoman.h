@@ -22,12 +22,12 @@ typedef struct large_block {
  * Initialize the allocator (optional - called automatically)
  * @return 0 on success, -1 on failure
  */
-int memoinit(void);
+int mm_init(void);
 
 /**
  * Cleanup and free all memory
  */
-void memodestroy(void);
+void mm_destroy(void);
 
 /**
  * Allocate memory from the custom heap
@@ -38,24 +38,17 @@ void memodestroy(void);
  * Uses a segregated free list with size classes for fast allocation.
  * Falls back to first-fit search if no size class match is found.
  */
-void* memomall(size_t size);
+void* mm_malloc(size_t size);
 
 /**
  * Free previously allocated memory
  * 
- * @param ptr Pointer to memory to free (returned by memomall)
+ * @param ptr Pointer to memory to free (returned by mm_malloc)
  * 
  * Adds the block back to the appropriate free list.
  * Periodically coalesces adjacent free blocks to reduce fragmentation.
  */
-void memofree(void* ptr);
-
-/**
- * Display current heap usage statistics
- * 
- * Shows total heap size, used space, free space, and usage percentage.
- */
-void print_heap_stats(void);
+void mm_free(void* ptr);
 
 /**
  * Reset the allocator to initial state
@@ -63,6 +56,13 @@ void print_heap_stats(void);
  * Clears all allocations and free lists. Use for testing or cleanup.
  */
 void reset_allocator(void);
+
+/**
+ * Display current heap usage statistics
+ * 
+ * Shows total heap size, used space, free space, and usage percentage.
+ */
+void print_heap_stats(void);
 
 /**
  * Display all blocks in the free list

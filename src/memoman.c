@@ -26,7 +26,6 @@ static block_header_t* size_classes[NUM_SIZE_CLASSES] = { NULL };
 static large_block_t* large_blocks = NULL;
 
 /* Utilities */
-
 static inline size_t align_size(size_t size) { 
   return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1); 
 }
@@ -115,7 +114,7 @@ static inline void* pop_from_class(int class) {
  * initial 1MB as PROT_READ | PROT_WRITE. Heap grows via mprotect (not mremap)
  * to prevent address changes that would invalidate user pointers.
  */
-int memoinit(void) {
+int mm_init(void) {
   if (heap != NULL) return 0;  
 
   heap = mmap(NULL, MAX_HEAP_SIZE, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
@@ -137,7 +136,7 @@ int memoinit(void) {
   return 0;
 }
 
-void memodestroy(void) {
+void mm_destroy(void) {
   if (heap != NULL) {
     munmap(heap, heap_capacity);
     heap = NULL;
@@ -173,8 +172,8 @@ static int grow_heap(size_t min_additional) {
  * 3. Free lists (>2KB): best-fit with splitting to minimize waste
  * 4. Bump allocation: linear allocation from heap top
  */
-void* memomall(size_t size) {
-  if (heap == NULL) { if (memoinit() != 0) return NULL; }
+void* mm_malloc(size_t size) {
+  if (heap == NULL) { if (mm_init() != 0) return NULL; }
   if (size == 0) return NULL;  
 
   // bypass allocator for large blocks to prevent fragmentation
@@ -260,7 +259,7 @@ void* memomall(size_t size) {
  * Performs forward and backward coalescing to reduce fragmentation.
  * Large blocks (>=1MB) are unmapped immediately.
  */
-void memofree(void* ptr) {
+void mm_free(void* ptr) {
   if (ptr == NULL) return;
   
   // check if this is a large allocation that should be unmapped
@@ -350,7 +349,6 @@ void memofree(void* ptr) {
 }
 
 /* Management */
-
 size_t get_total_allocated(void) { return total_allocated; }
 size_t get_free_space(void) { return heap_capacity - (current - heap); }
 block_header_t* get_free_list(void) { return free_list[0]; }

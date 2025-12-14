@@ -3,10 +3,10 @@
 #include <stdio.h>
 
 int main() {
-  char* str = memomall(50);
+  char* str = mm_malloc(50);
   strcpy(str, "Hello World!");
   printf("String: %s\n", str);  
-  int* nums = memomall(sizeof(int) * 5);
+  int* nums = mm_malloc(sizeof(int) * 5);
   
   for (int i = 0; i < 5; i++) {
       nums[i] = i * 10;

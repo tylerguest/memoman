@@ -18,8 +18,8 @@ int main() {
   
   reset_allocator();
   double start = get_time();
-  for (int i = 0; i < NUM_ALLOCS; i++) { ptrs[i] = memomall(80); }  // 19.53 KB matrix row
-  for (int i = 0; i < NUM_ALLOCS; i++) { memofree(ptrs[i]); }
+  for (int i = 0; i < NUM_ALLOCS; i++) { ptrs[i] = mm_malloc(80); }  // 19.53 KB matrix row
+  for (int i = 0; i < NUM_ALLOCS; i++) { mm_free(ptrs[i]); }
   double memoman_time = get_time() - start;
   
   start = get_time();

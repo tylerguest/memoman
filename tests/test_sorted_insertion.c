@@ -24,54 +24,54 @@ int main(void) {
   printf("Test 1: Random order frees maintain sorting\n");
   reset_allocator();
   void* p[5];
-  for (int i = 0; i < 5; i++) p[i] = memomall(3000);
+  for (int i = 0; i < 5; i++) p[i] = mm_malloc(3000);
 
-  memofree(p[2]);
+  mm_free(p[2]);
   assert(verify_sorted());
-  memofree(p[4]);
+  mm_free(p[4]);
   assert(verify_sorted());
-  memofree(p[0]);
+  mm_free(p[0]);
   assert(verify_sorted());
-  memofree(p[3]);
+  mm_free(p[3]);
   assert(verify_sorted());
-  memofree(p[1]);
+  mm_free(p[1]);
   assert(verify_sorted());
   printf("Passed\n\n");
 
   printf("Test 2: Insert at beginning\n");
   reset_allocator();
-  void* p1 = memomall(3000);
-  void* p2 = memomall(3000);
-  memofree(p2);
-  memofree(p1);
+  void* p1 = mm_malloc(3000);
+  void* p2 = mm_malloc(3000);
+  mm_free(p2);
+  mm_free(p1);
   assert(verify_sorted());
   printf("Passed\n");
 
   printf("Test 3: Insert at end\n");
   reset_allocator();
-  p1 = memomall(3000);
-  p2 = memomall(3000);
-  memofree(p1);
-  memofree(p2);
+  p1 = mm_malloc(3000);
+  p2 = mm_malloc(3000);
+  mm_free(p1);
+  mm_free(p2);
   assert(verify_sorted());
   printf("Passed\n\n");
 
   printf("Test 4: Insert in middle\n");
   reset_allocator();
-  p1 = memomall(3000);
-  p2 = memomall(3000);
-  void* p3 = memomall(3000);
-  memofree(p1);
-  memofree(p3);
-  memofree(p2);
+  p1 = mm_malloc(3000);
+  p2 = mm_malloc(3000);
+  void* p3 = mm_malloc(3000);
+  mm_free(p1);
+  mm_free(p3);
+  mm_free(p2);
   assert(verify_sorted());
   printf("Passed\n\n");
 
   printf("Test 5: Coalescing maintains sort order\n");
   reset_allocator();
   void* ptrs[60];
-  for (int i = 0; i < 60; i++) ptrs[i] = memomall(3000);
-  for (int i = 0; i < 60; i++) memofree(ptrs[i]);
+  for (int i = 0; i < 60; i++) ptrs[i] = mm_malloc(3000);
+  for (int i = 0; i < 60; i++) mm_free(ptrs[i]);
   assert(verify_sorted());
   printf("Passed\n\n");
 

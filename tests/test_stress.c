@@ -6,14 +6,14 @@ int main() {
   
   void* ptrs[10];  
   for (int i = 0; i < 10; i++) {
-      ptrs[i] = memomall(50 + i * 20);
+      ptrs[i] = mm_malloc(50 + i * 20);
       printf("Allocated ptr[%d]\n", i);
   }  
   
   print_free_list();  
   
   for (int i = 1; i < 10; i += 2) {
-      memofree(ptrs[i]);
+      mm_free(ptrs[i]);
       printf("Freed ptr[%d]\n", i);
   }  
   

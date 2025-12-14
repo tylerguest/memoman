@@ -11,7 +11,7 @@ int main() {
   
   for (int i = 0; i < 12; i++) {
     printf("   Attempt %d: Allocating 100KB...\n", i + 1);
-    ptrs[i] = memomall(100 * 1024); // 100KB  
+    ptrs[i] = mm_malloc(100 * 1024); // 100KB  
     if (ptrs[i] == NULL) {
         printf("   Allocation %d FAILED (expected after ~10 allocations)\n", i + 1);
         break;
@@ -22,7 +22,7 @@ int main() {
   printf("\n3. Try one massive allocation:\n");
   printf("   Attempting to allocate 2MB (larger than our 1MB heap)...\n");
   
-  void* huge = memomall(2 * 1024 * 1024);  
+  void* huge = mm_malloc(2 * 1024 * 1024);  
   if (huge == NULL) { printf("   Correctly rejected oversize allocation\n"); } 
   else { printf("   Unexpectedly succeeded! This shouldn't happen.\n"); }  
   

@@ -6,18 +6,18 @@ int main() {
   printf("=== Block Splitting Test ===\n");  
   
   printf("1. Allocate a large block:\n");
-  char* ptr1 = (char*)memomall(400);
+  char* ptr1 = (char*)mm_malloc(400);
   strcpy(ptr1, "Large block");  
   
   printf("2. Free the large block:\n");
-  memofree(ptr1);  
+  mm_free(ptr1);  
   
   printf("3. Allocate smaller block (should split):\n");
-  char* ptr2 = (char*)memomall(100);
+  char* ptr2 = (char*)mm_malloc(100);
   strcpy(ptr2, "Small reused block");  
   
   printf("4. Allocate another small block (should use split remainder):\n");
-  char* ptr3 = (char*)memomall(200);
+  char* ptr3 = (char*)mm_malloc(200);
   strcpy(ptr3, "Using remainder");  
   printf("   ptr2: %s\n", ptr2);
   printf("   ptr3: %s\n", ptr3);  

@@ -40,21 +40,21 @@ int main() {
     for (int i = 0; i < iterations; i++) {
       size_t size = (i % 10 == 0) ? (100 + rand() % 1000000) : (100 + i % 400);  
       if (active_count < 100 || (i % 2 == 0)) {
-        void* ptr = memomall(size);
+        void* ptr = mm_malloc(size);
         if (ptr) {
           if (size >= sizeof(uint64_t)) { *(uint64_t*)ptr = (uint64_t)i; }
           if (active_count < 100) {
             ptrs[active_count++] = ptr;
             total_allocated += size;
-          } else { memofree(ptr); }
+          } else { mm_free(ptr); }
         }
       } else {
           int idx = rand() % active_count;
-          memofree(ptrs[idx]);
+          mm_free(ptrs[idx]);
           ptrs[idx] = ptrs[--active_count];
       }
     }  
-    for (int i = 0; i < active_count; i++) { memofree(ptrs[i]); }  
+    for (int i = 0; i < active_count; i++) { mm_free(ptrs[i]); }  
     double end = get_time();
     your_times[t] = end - start;  
     printf("  Testing system malloc...\n");
