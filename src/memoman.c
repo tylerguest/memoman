@@ -222,74 +222,104 @@ static inline void block_mark_as_free(tlsf_block_t* block) {
   if (next) { block_set_prev_used(next); }
 }
 
-/* Size Classes - to be removed */
+/* TLSF Free List Management */
 
 /*
- * Maps allocation sizes to size class indices for 0(1) lookup.
- * Size classes use power-of-2 and intermediate steps to balance
- * memory efficienct with low fragmentation.
- * Returns -1 for sizes exceeding 1MB (handled by free lists or direct mmap).
+ * Insert block into appropriate segregated free list
+ * 0(1) operation - inserts at head of list, updates bitmaps
  */
-static inline int get_size_class(size_t size) {
-  if (size <= 128) {
-    if (size <= 16) return 0;
-    if (size <= 24) return 1;
-    if (size <= 32) return 2;
-    if (size <= 48) return 3;
-    if (size <= 64) return 4;
-    if (size <= 96) return 5;
-    return 6; 
-  }
-  
-  if (size <= 2048) {
-    if (size <= 192) return 7;
-    if (size <= 256) return 8;
-    if (size <= 512) return 9;
-    if (size <= 1024) return 10;
-    return 11;
-  }
-  
-  if (size <= 16384) {
-    if (size <= 4096) return 12;
-    if (size <= 8192) return 13;
-    return 14;
-  }
-  
-  if (size <= 65536) {
-    if (size <= 32768) return 15;
-    return 16;
-  }
-  
-  if (size <= 131072) return 17;
-  if (size <= 262144) return 18;  
-  if (size <= 524288) return 19;  
-  if (size <= 1048576) return 20;   
-  
-  return -1;  
+static inline void insert_free_block(tlsf_control_t* ctrl, tlsf_block_t* block) {
+  int fl, sl;
+  mapping(block_size(block), &fl, &sl);
+
+  /* Insert at head of list */
+  tlsf_block_t* current_head = ctrl->blocks[fl][sl];
+  block->next_free = current_head;
+  block->prev_free = NULL;
+
+  if (current_head) { current_head->prev_free = block; }
+
+  ctrl->blocks[fl][sl] = block;
+
+  /* Update bitmaps to mark list as non-empty */
+  set_fl_bit(ctrl, fl);
+  set_sl_bit(ctrl, fl, sl);
 }
 
 /*
- * Maps blocks >2KB to degregated free list indices.
- * Returns -1 for blocks <=2KB (handled by size classes instead).
+ * Remove block from its segregated free list
+ * O(1) operation - uses doubly-linbked list pointers
+ * Updates bitmaps when list becomes empty
  */
-static inline int get_free_list_index(size_t size) {
-  if (size <= 2048) return -1; 
-  int index = 0;
-  size_t min_size = 2048;
-  while (min_size * 2 <= size && index < NUM_FREE_LISTS - 1) {
-    min_size *= 2;
-    index++;
+static inline void remove_free_block(tlsf_control_t* ctrl, tlsf_block_t* block) {
+  int fl, sl;
+  mapping(block_size(block), &fl, &sl);
+
+  tlsf_block_t* prev = block->prev_free;
+  tlsf_block_t* next = block->next_free;
+
+  /* Update previous block's next pointer (or list head) */
+  if (prev) { prev->next_free = next ;}
+  else {
+    /* Removing head of list */
+    ctrl->blocks[fl][sl] = next;
+
+    /* Update bitmaps if list becomes empty */
+    if (next == NULL) {
+      clear_sl_bit(ctrl, fl, sl);
+
+      /* Check if entire FL is now empty */
+      if (ctrl->sl_bitmap[fl] == 0) { clear_fl_bit(ctrl, fl); }
+    }
   }
-  return index;
+
+  /* Update next block's prev pointer */
+  if (next) { next->prev_free = prev; }
+
+  /* Clear block's free list pointers */
+  block->next_free = NULL;
+  block->prev_free = NULL;
 }
 
-static inline void* pop_from_class(int class) {
-  if (class < 0 || class >= NUM_SIZE_CLASSES || !size_classes[class]) { return NULL; }
-  block_header_t* block = size_classes[class];
-  size_classes[class] = block->next;
-  block->is_free = 0;
-  block->next = NULL;
-  return header_to_user(block);
+/*
+ * Search for suitable free block using TLSF two-level bitmap search
+ * O(1) operation - uses bitmaps to find smallest sufficient block
+ * 
+ * Strategy:
+ * 1. Map requested size to FL/SL
+ * 2. Search same FL for block >= requested SL
+ * 3. If not found, search next non-empty FL
+ * 4. Return first block from found list (guaranteed to fit)
+ */
+static inline tlsf_block_t* search_suitable_block(tlsf_control_t* ctrl, size_t size) {
+  int fl, sl;
+  mapping(size, &fl, &sl);
+
+  /* Search for block in same FL, starting at SL */
+  int sl_found = find_suitable_sl(ctrl, fl, sl);
+
+  if (sl_found >= 0) {
+    /* Found in same FL */
+    return ctrl->blocks[fl][sl_found];
+  }
+
+  /* No suitable block in same FL - search next FL */
+  int fl_found = find_suitable_fl(ctrl, fl + 1);
+
+  if (fl_found < 0) {
+    /* No suitable block found in entire allocator */
+    return NULL;
+  }
+
+  /* Get first non-empty SL in the found FL */
+  sl_found = find_suitable_sl(ctrl, fl_found, 0);
+
+  if (sl_found < 0) {
+    /* Bitmap inconsistency - should not happen */
+    return NULL;
+  }
+
+  return ctrl->blocks[fl_found][sl_found];
 }
 
 /* Allocation */
