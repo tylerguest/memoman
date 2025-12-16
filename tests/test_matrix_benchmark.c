@@ -3,10 +3,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <string.h> // For memset
 
 #ifndef CLOCK_MONOTONIC
 #define CLOCK_MONOTONIC 1
 #endif
+
+// Helper to shuffle arrays (simulates random free order)
+void shuffle(void **array, int n) {
+    for (int i = 0; i < n - 1; i++) {
+        int j = i + rand() / (RAND_MAX / (n - i) + 1);
+        void *t = array[j];
+        array[j] = array[i];
+        array[i] = t;
+    }
+}
 
 double get_time() {
   struct timespec ts;
@@ -14,131 +25,127 @@ double get_time() {
   return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
-void multiply_matrices(double** A, double** B, double** C, int N) {
-  for (int i = 0; i < N; i++) {
-    for (int j = 0; j < N; j++) {
-      C[i][j] = 0.0;
-      for (int k = 0; k < N; k++) {
-        C[i][j] += A[i][k] * B[k][j];
-      }
-    }
-  }
-}
-
-void init_matrix(double** matrix, int N) {
-  for (int i = 0; i < N; i++) {
-    for (int j = 0; j < N; j++) {
-      matrix[i][j] = (double)(rand() % 100) / 10.0;
-    }
-  }
-}
-
-double test_memoman(int N, int iterations) {
+// TEST 1: LINEAR (Stack-like behavior)
+// This favors glibc malloc heavily because of "tcache" (hot stack)
+double test_memoman_linear(int num_allocs, size_t size) {
+  void** ptrs = malloc(num_allocs * sizeof(void*));
+  // Note: NOT resetting allocator inside loop to test sustainment
+  reset_allocator(); 
+  
   double start = get_time();
   
-  for (int iter = 0; iter < iterations; iter++) {
-    reset_allocator();
-    
-    double** A = (double**)mm_malloc(N * sizeof(double*));
-    double** B = (double**)mm_malloc(N * sizeof(double*));
-    double** C = (double**)mm_malloc(N * sizeof(double*));
-    
-    for (int i = 0; i < N; i++) {
-        A[i] = (double*)mm_malloc(N * sizeof(double));
-        B[i] = (double*)mm_malloc(N * sizeof(double));
-        C[i] = (double*)mm_malloc(N * sizeof(double));
-    }
-    
-    init_matrix(A, N);
-    init_matrix(B, N);
-    
-    multiply_matrices(A, B, C, N);
-    
-    for (int i = 0; i < N; i++) {
-        mm_free(A[i]);
-        mm_free(B[i]);
-        mm_free(C[i]);
-    }
-    mm_free(A);
-    mm_free(B);
-    mm_free(C);
+  for(int k=0; k<100; k++) { // Run 100 times to get measurable time
+      for (int i = 0; i < num_allocs; i++) {
+        ptrs[i] = mm_malloc(size);
+        // Optional: Write to memory to force page fault
+        if(ptrs[i]) memset(ptrs[i], 0, size); 
+      }
+      for (int i = 0; i < num_allocs; i++) {
+        if(ptrs[i]) mm_free(ptrs[i]);
+      }
   }
   
   double end = get_time();
+  free(ptrs);
   return end - start;
 }
 
-double test_malloc(int N, int iterations) {
+double test_malloc_linear(int num_allocs, size_t size) {
+  void** ptrs = malloc(num_allocs * sizeof(void*));
+  
   double start = get_time();
   
-  for (int iter = 0; iter < iterations; iter++) {
-    double** A = (double**)malloc(N * sizeof(double*));
-    double** B = (double**)malloc(N * sizeof(double*));
-    double** C = (double**)malloc(N * sizeof(double*));
-    
-    for (int i = 0; i < N; i++) {
-      A[i] = (double*)malloc(N * sizeof(double));
-      B[i] = (double*)malloc(N * sizeof(double));
-      C[i] = (double*)malloc(N * sizeof(double));
-    }
-    
-    init_matrix(A, N);
-    init_matrix(B, N);
-    
-    multiply_matrices(A, B, C, N);
-    
-    for (int i = 0; i < N; i++) {
-      free(A[i]);
-      free(B[i]);
-      free(C[i]);
-    }
-
-    free(A);
-    free(B);
-    free(C);
+  for(int k=0; k<100; k++) {
+      for (int i = 0; i < num_allocs; i++) {
+        ptrs[i] = malloc(size);
+        if(ptrs[i]) memset(ptrs[i], 0, size);
+      }
+      for (int i = 0; i < num_allocs; i++) {
+        if(ptrs[i]) free(ptrs[i]);
+      }
   }
   
   double end = get_time();
+  free(ptrs);
+  return end - start;
+}
+
+// TEST 2: RANDOM FREE (Fragmentation Stress)
+// This is where TLSF should show stability vs malloc's fragmentation issues
+double test_memoman_random(int num_allocs, size_t size) {
+  void** ptrs = malloc(num_allocs * sizeof(void*));
+  reset_allocator();
+  
+  double start = get_time();
+  
+  for(int k=0; k<50; k++) {
+      // 1. Allocate all
+      for (int i = 0; i < num_allocs; i++) {
+        ptrs[i] = mm_malloc(size);
+      }
+      
+      // 2. Shuffle the pointers (Free in random order)
+      shuffle(ptrs, num_allocs);
+      
+      // 3. Free all
+      for (int i = 0; i < num_allocs; i++) {
+        if(ptrs[i]) mm_free(ptrs[i]);
+      }
+  }
+  
+  double end = get_time();
+  free(ptrs);
+  return end - start;
+}
+
+double test_malloc_random(int num_allocs, size_t size) {
+  void** ptrs = malloc(num_allocs * sizeof(void*));
+  
+  double start = get_time();
+  
+  for(int k=0; k<50; k++) {
+      for (int i = 0; i < num_allocs; i++) {
+        ptrs[i] = malloc(size);
+      }
+      
+      shuffle(ptrs, num_allocs);
+      
+      for (int i = 0; i < num_allocs; i++) {
+        if(ptrs[i]) free(ptrs[i]);
+      }
+  }
+  
+  double end = get_time();
+  free(ptrs);
   return end - start;
 }
 
 int main() {
-  printf("=== Matrix Multiplication Benchmark ===\n\n");
+  printf("=== Pure Allocator Benchmark ===\n");
+  srand(42); 
+
+  int num_allocs = 5000;
+  size_t alloc_size = 256; // 256 bytes
+
+  printf("\n--- Test 1: Linear Alloc/Free (Stack Behavior) ---\n");
+  printf("Allocating %d blocks of %zu bytes, 100 times.\n", num_allocs, alloc_size);
   
-  srand(42);  // Consistent results
+  double t_mem = test_memoman_linear(num_allocs, alloc_size);
+  double t_mal = test_malloc_linear(num_allocs, alloc_size);
   
-  int sizes[] = {10, 50, 100, 200};
-  int num_sizes = sizeof(sizes) / sizeof(sizes[0]);
+  printf("memoman: %.6f s\n", t_mem);
+  printf("malloc:  %.6f s\n", t_mal);
+  printf("Ratio:   malloc is %.2fx faster\n", t_mem/t_mal);
+
+  printf("\n--- Test 2: Random Free (Fragmentation Stress) ---\n");
+  printf("Allocating %d blocks, shuffling, freeing, 50 times.\n", num_allocs);
   
-  printf("Testing allocation/deallocation performance with matrix multiplication\n");
-  printf("Each test runs multiple iterations of: allocate -> compute -> free\n\n");
+  t_mem = test_memoman_random(num_allocs, alloc_size);
+  t_mal = test_malloc_random(num_allocs, alloc_size);
   
-  for (int s = 0; s < num_sizes; s++) {
-    int N = sizes[s];
-    int iterations = (N <= 50) ? 100 : (N <= 100) ? 20 : 5;
-    
-    printf("Matrix size: %dx%d (%.2f KB per matrix)\n", 
-           N, N, (N * N * sizeof(double)) / 1024.0);
-    printf("Iterations: %d\n", iterations);
-    
-    printf("  Testing memoman...");
-    fflush(stdout);
-    double memoman_time = test_memoman(N, iterations);
-    printf(" %.6f seconds\n", memoman_time);
-    
-    printf("  Testing malloc...");
-    fflush(stdout);
-    double malloc_time = test_malloc(N, iterations);
-    printf(" %.6f seconds\n", malloc_time);
-    
-    double speedup = malloc_time / memoman_time;
-    printf("  Result: memoman is %.2fx %s than malloc\n", 
-           speedup > 1.0 ? speedup : 1.0 / speedup,
-           speedup > 1.0 ? "faster" : "slower");
-    printf("  Operations/sec (memoman): %.2f\n", iterations / memoman_time);
-    printf("  Operations/sec (malloc):  %.2f\n\n", iterations / malloc_time);
-  }
-  
-  printf("=== Benchmark Complete ===\n");
+  printf("memoman: %.6f s\n", t_mem);
+  printf("malloc:  %.6f s\n", t_mal);
+  printf("Ratio:   malloc is %.2fx faster\n", t_mem/t_mal);
+
   return 0;
 }
