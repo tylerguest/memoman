@@ -10,43 +10,26 @@
 #define ALIGNMENT 8
 #define LARGE_ALLOC_THRESHOLD (1024 * 1024)
 
-/* Legacy - to be removed */
-#define COALESCE_THRESHOLD 10
-#define NUM_SIZE_CLASSES 21
-#define NUM_FREE_LISTS 8
-
 /* Heap management */
 #define INITIAL_HEAP_SIZE (1024 * 1024)
 #define MAX_HEAP_SIZE (1024 * 1024 * 1024)
 #define HEAP_GROWTH_FACTOR 2
 
 /* TLSF Control */
-static tlsf_control_t* tlsf_ctrl = NULL;
+tlsf_control_t* tlsf_ctrl = NULL;
 
 /* Large block tracking */
 static large_block_t* large_blocks = NULL;
 
-/* Legacy globals - to be removed*/
+/* Heap globals */
 char* heap = NULL;
 char* current = NULL;
-static size_t heap_size = 0;
 size_t heap_capacity = 0;
-static size_t total_allocated = 0;
-block_header_t* free_list[NUM_FREE_LISTS] = { NULL };
-static block_header_t* size_classes[NUM_SIZE_CLASSES] = { NULL };
-
 
 /* Utilities */
-static inline size_t align_size(size_t size) { 
-  return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1); 
-}
-
-static inline void* header_to_user(block_header_t* header) { 
-  return (char*)header + sizeof(block_header_t); 
-}
-static inline block_header_t* user_to_header(void* ptr) { 
-  return (block_header_t*)((char*)ptr - sizeof(block_header_t)); 
-}
+static inline size_t align_size(size_t size) { return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1); }
+static inline void* header_to_user(block_header_t* header) { return (char*)header + sizeof(block_header_t); }
+static inline block_header_t* user_to_header(void* ptr) { return (block_header_t*)((char*)ptr - sizeof(block_header_t)); }
 
 /* TLSF Bit Manipulation Functions*/
 
@@ -76,7 +59,10 @@ static inline int mapping_fli(size_t size) { return fls_generic(size); }
  * SLI subdividese the FLI range into TLSF_SLI_COUNT bins
  * Extracts the next TLSF_SLI bits after the MSB
  */
-static inline int mapping_sli(size_t size, int fl) { return (int)((size >> (fl - TLSF_SLI)) & (TLSF_SLI_COUNT -1 )); }
+static inline int mapping_sli(size_t size, int fl) { 
+  if (fl < TLSF_SLI) return 0; /* Prevent negative shift */
+  return (int)((size >> (fl - TLSF_SLI)) & (TLSF_SLI_COUNT -1 )); 
+}
 
 /*
  * Combined mapping function
@@ -88,9 +74,18 @@ static inline void mapping(size_t size, int* fl, int* sl) {
     *fl = 0;
     *sl = 0;
   } else {
-    *fl = mapping_fli(size);
-    *sl = mapping_sli(size, *fl);
-    *fl -= TLSF_FLI_OFFSET;  // adjust for some mininum block size
+    int fli = mapping_fli(size);
+    *sl = mapping_sli(size, fli);
+    *fl = fli - TLSF_FLI_OFFSET;
+
+    /* Clamp to valid range */
+    if (*fl < 0) {
+      *fl = 0;
+      *sl = 0;
+    } else if (*fl >= TLSF_FLI_MAX) {
+      *fl = TLSF_FLI_MAX - 1;
+      *sl = TLSF_SLI_COUNT - 1;
+    }
   }
 }
 
@@ -181,7 +176,14 @@ static inline void block_set_prev_used(tlsf_block_t* block) { block->size &= ~TL
  * Get next physical block
  * Advances point by block header size plus blocks's data size
  */
-static inline tlsf_block_t* block_next(tlsf_block_t* block) { return (tlsf_block_t*)((char*)block + sizeof(tlsf_block_t) + block_size(block)); }
+static inline tlsf_block_t* block_next(tlsf_block_t* block) { 
+  tlsf_block_t* next = (tlsf_block_t*)((char*)block + sizeof(tlsf_block_t) + block_size(block)); 
+
+  /* Boundary check - don't return invalid pointer */
+  if (tlsf_ctrl && (char*)next >= tlsf_ctrl->heap_end) { return NULL; }
+
+  return next;
+}
 
 /*
  * Get previous physical block using boundary tag
@@ -219,7 +221,7 @@ static inline void block_mark_as_free(tlsf_block_t* block) {
 
   /* Update next block's prev_free flag */
   tlsf_block_t* next = block_next(block);
-  if (next) { block_set_prev_used(next); }
+  if (next) { block_set_prev_free(next); }
 }
 
 /* TLSF Free List Management */
@@ -322,12 +324,206 @@ static inline tlsf_block_t* search_suitable_block(tlsf_control_t* ctrl, size_t s
   return ctrl->blocks[fl_found][sl_found];
 }
 
+/* TLSF Block Splititng & Coalescing */
+
+/*
+ * Split block if remainder is usable
+ * Returns pointer to remainder block (not inserted into free list)
+ * Returns NULL if block cannot be split (too small)
+ *
+ * Requirements for splitting:
+ * - Remainder must fit TLSF_MIN_BLOCK_SIZE + block_header
+ * - Original block is updated to requested size
+ * - New block is created in remainder space
+ */
+static inline tlsf_block_t* split_block(tlsf_block_t* block, size_t size) {
+  size_t block_total_size = block_size(block);
+  size_t min_split_size = TLSF_MIN_BLOCK_SIZE + sizeof(tlsf_block_t);
+
+  /* Check if remainder is usable */
+  if (block_total_size < size + min_split_size) {
+    /* Can't split - remainder too small */
+    return NULL;
+  }
+
+  size_t remainder_size = block_total_size - size - sizeof(tlsf_block_t);
+
+  /* Update original block size */
+  block_set_size(block, size);
+
+  /* Create new block in remainder */
+  tlsf_block_t* remainder = (tlsf_block_t*)((char*)block + sizeof(tlsf_block_t) + size);
+  block_set_size(remainder, remainder_size);
+  block_set_free(remainder);
+
+  /* Initialize free list pointers */
+  remainder->next_free = NULL;
+  remainder->prev_free = NULL;
+
+  /* Update physical block linkage */
+  remainder->prev_phys = block;
+
+  /* Mark remainder's previous block (the allocated block) as used */
+  block_set_prev_used(remainder);
+
+  /* Upadate next block's prev_phys pointer */
+  tlsf_block_t* next = block_next(remainder);
+  if (next) { 
+    next->prev_phys = remainder; 
+    /* Update next block's prev_phys pointer */
+    block_set_prev_free(next);
+  }
+  
+  return remainder;
+}
+
+/*
+ * Coalesce with previous physical block
+ * Both blocks must be free and prev must be physically adjacent
+ * Removes prev from free list, combines size, returns merged block
+ * Caller must insert returned blockinto free list
+ */
+static inline tlsf_block_t* coalesce_prev(tlsf_control_t* ctrl, tlsf_block_t* block) {
+  if(!block_is_prev_free(block)) { return block; }
+
+  tlsf_block_t* prev = block_prev(block);
+  if (!prev || !block_is_free(prev)) { return block; }
+  
+  /* Remove prev from free list */
+  remove_free_block(ctrl, prev);
+
+  /* Merge: prev absorbs current block */
+  size_t combined_size = block_size(prev) + sizeof(tlsf_block_t) + block_size(block);
+  block_set_size(prev, combined_size);
+
+  /* Update next block's prev_phys to point to merged block */
+  tlsf_block_t* next = block_next(prev);
+  if (next) { next->prev_phys = prev; }
+
+  return prev;
+}
+
+/*
+ * Coalesce with next physical block
+ * Both blocks must be free and physically adjacent
+ * Removes next from free list, combines sizes, returns merged block
+ * Caler must insert returned block into free list
+ */
+static inline tlsf_block_t* coalesce_next(tlsf_control_t* ctrl, tlsf_block_t* block) {
+  tlsf_block_t* next = block_next(block);
+
+  if (!next || !block_is_free(next)) { return block; }
+
+  /* Remove next from free list */
+  remove_free_block(ctrl, next);
+
+  /* Merge: current block absrobs next */
+  size_t combined_size = block_size(block) + sizeof(tlsf_block_t) + block_size(next);
+  block_set_size(block, combined_size);
+
+  /* Update next-next block's prev_phys to point to merged block */
+  tlsf_block_t* next_next = block_next(block);
+  if(next_next) { next_next->prev_phys = block; }
+
+  return block;
+}
+
+/*
+ * Coalesce block with adjacent free blocks (immediate coalescing)
+ * Tries to merge with both previous and next blocks
+ * Removes merged blocks from free lists
+ * Returns final coalesced block (caller must insert into free list)
+ *
+ * Strategy:
+ * 1. Try coalescing with previous block
+ * 2. Try coalescing with next block
+ * 3. Return final merged block
+ */
+static inline tlsf_block_t* coalesce(tlsf_control_t* ctrl, tlsf_block_t* block) {
+  /* Coalesce with previous block first */
+  block = coalesce_prev(ctrl, block);
+
+  /* Then coalesce with next block */
+  block = coalesce_next(ctrl, block);
+
+  return block;
+}
+
+/* TLSF Wilderness Management */
+
+/*
+ * Create free block from uncommitted/newly committed heap space
+ * Searches for previous physical block to maintain boundary tags
+ * Coalesces with adjacent free blocks automatically
+ * Inserts final block intro TLSF free lists
+ *
+ * @param ctrl TLSF control structure
+ * @param start Start address of new heap region
+ * @param siuze Size of new heap region
+ */
+static void create_free_block(tlsf_control_t* ctrl, void* start, size_t size) {
+  if (!ctrl || !start || size < sizeof(tlsf_block_t) + TLSF_MIN_BLOCK_SIZE) { return; }
+
+  /* Create new block header */
+  tlsf_block_t* block = (tlsf_block_t*)start;
+  size_t block_data_size = size - sizeof(tlsf_block_t);
+  block_set_size(block, block_data_size);
+  block_set_free(block);
+  
+  /* Initialize free list pointers */
+  block->next_free = NULL;
+  block->prev_free = NULL;
+
+  /* Find previous physical block by searching backward from start */
+  tlsf_block_t* prev_block = NULL;
+
+  /* Search through all free lists to find physically adjacent previous block */
+  for (int fl = 0; fl < TLSF_FLI_MAX && !prev_block; fl++) {
+    for (int sl = 0; sl < TLSF_SLI_COUNT && !prev_block; sl++) {
+      tlsf_block_t* curr = ctrl->blocks[fl][sl];
+      while (curr) {
+        char* curr_end = (char*)curr + sizeof(tlsf_block_t) + block_size(curr);
+        if (curr_end == (char*)block) {
+          prev_block = curr;
+          break;
+        }
+        curr = curr->next_free;
+      }
+    }
+  }
+  
+  /* Set up physical linkage */
+  block->prev_phys = prev_block;
+  
+  if (prev_block) {
+    /* Update prev_free flag based on previous block state */
+    if (block_is_free(prev_block)) {
+      block_set_prev_free(block);
+    } else {
+      block_set_prev_used(block);
+    }
+  } else {
+    /* First block in heap - no previous blocks */
+    block_set_prev_used(block);
+  }
+
+  /* Try to coalesce with adjacent blocks */
+  block = coalesce(ctrl, block);
+
+  /* Insert into TLSF free lists */
+  insert_free_block(ctrl, block);
+}
+
 /* Allocation */
 
 /*
  * Reserve-then-commit strategy: reserves 1GB address space but only commits
  * initial 1MB as PROT_READ | PROT_WRITE. Heap grows via mprotect (not mremap)
  * to prevent address changes that would invalidate user pointers.
+ *
+ * TLSF initialization:
+ * - Allocates control structure at start of heap
+ * - Creates initial free block from remaining space
  */
 int mm_init(void) {
   if (heap != NULL) return 0;  
@@ -338,7 +534,8 @@ int mm_init(void) {
     heap = NULL;
     return -1;
   }
-
+  
+  /* Commit initial 1MB */
   if (mprotect(heap, INITIAL_HEAP_SIZE, PROT_READ | PROT_WRITE) != 0) {
     munmap(heap, MAX_HEAP_SIZE);
     heap = NULL;
@@ -347,21 +544,44 @@ int mm_init(void) {
 
   heap_capacity = INITIAL_HEAP_SIZE;
   current = heap;
-  heap_size = 0;
+
+  /* Allocate TLSF control structure at start of heap */
+  tlsf_ctrl = (tlsf_control_t*)heap;
+  current = heap + sizeof(tlsf_control_t);
+
+  /* Zero out control structure (bitmaps and block matrix) */
+  memset(tlsf_ctrl, 0, sizeof(tlsf_control_t));
+
+  /* Set heap bounds */
+  tlsf_ctrl->heap_start = current;
+  tlsf_ctrl->heap_end = heap + heap_capacity;
+  tlsf_ctrl->heap_capacity = heap_capacity;
+
+  /* Create initial free block spanning usable heap */
+  size_t initial_free_size = heap + heap_capacity - current;
+  if (initial_free_size >= sizeof(tlsf_block_t) + TLSF_MIN_BLOCK_SIZE) { create_free_block(tlsf_ctrl, current, initial_free_size); }
+
   return 0;
 }
 
 void mm_destroy(void) {
+  /* Cleanup large blocks */
+  while (large_blocks) {
+    large_block_t* next = large_blocks->next;
+    munmap(large_blocks, large_blocks->size);
+    large_blocks = next;
+  }
+
+  /* Munmap main heap */
   if (heap != NULL) {
-    munmap(heap, heap_capacity);
+    munmap(heap, MAX_HEAP_SIZE); /* Unmap entire reserved region */
     heap = NULL;
     heap_capacity = 0;
-    heap_size = 0;
     current = NULL;
   }
 
-  for (int i = 0; i < NUM_FREE_LISTS; i++) free_list[i] = NULL;
-  for (int i = 0; i < NUM_SIZE_CLASSES; i++) size_classes[i] = NULL;
+  /* Clear TLSF control pointer */
+  tlsf_ctrl = NULL;
 }
 
 /*
@@ -369,29 +589,52 @@ void mm_destroy(void) {
  * Uses mprotect on pre-reserved address space to avoid heap relocation.
  */
 static int grow_heap(size_t min_additional) {
+  size_t old_capacity = heap_capacity;
   size_t new_capacity = heap_capacity * HEAP_GROWTH_FACTOR;
+  
   while (new_capacity < heap_capacity + min_additional) { new_capacity *= HEAP_GROWTH_FACTOR; }
+  
   if (new_capacity > MAX_HEAP_SIZE) { new_capacity = MAX_HEAP_SIZE; }
+  
   if (new_capacity <= heap_capacity) { return -1; } // can't grow further
   
+  /* Commit new region using mprotect (preserves base address) */
   if (mprotect(heap, new_capacity, PROT_READ | PROT_WRITE) != 0) { return -1; }
   
   heap_capacity = new_capacity;
+
+  /* If TLSF is active, create free block in newly committed region */
+  if (tlsf_ctrl) {
+    size_t growth_size = new_capacity - old_capacity;
+    void* new_region = heap + old_capacity;
+
+    /* Update heap_end in control structure */
+    tlsf_ctrl->heap_end = heap + new_capacity;
+
+    /* Create free block spanning the newly committed region */
+    create_free_block(tlsf_ctrl, new_region, growth_size);
+  }
+
   return 0;
 }
 
 /*
- * Four-tier allocation strategy:
- * 1. Large blocks (>=1MB): direct mmap to avoid fragmenting main heap
- * 2. Size classes (<=2KB): 0(1) exact-fit from segregated lists
- * 3. Free lists (>2KB): best-fit with splitting to minimize waste
- * 4. Bump allocation: linear allocation from heap top
+ * TLSF allocation with dynamic heap growth
+ *
+ * Strategy:
+ * 1. Large blocks (>=1MB): direct mmap bypass
+ * 2. TLSF search: O(1) bitmap-based good-fit
+ * 3. Block splitting: minimize waste
+ * 4. Heap growth: expand when no suitable block found
  */
 void* mm_malloc(size_t size) {
+  /* Lazy initialization */
   if (heap == NULL) { if (mm_init() != 0) return NULL; }
-  if (size == 0) return NULL;  
 
-  // bypass allocator for large blocks to prevent fragmentation
+  /* Edge case: zero size */
+  if (size == 0) return NULL;
+
+  /* Large block bypass - direct mmap to avoid fragmentation */
   if (size >= LARGE_ALLOC_THRESHOLD) {
     size_t total_size = sizeof(large_block_t) + align_size(size);
     void* ptr = mmap(NULL, total_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -404,80 +647,56 @@ void* mm_malloc(size_t size) {
 
     return (char*)ptr + sizeof(large_block_t);
   }
-
-  size = align_size(size);  
-
-  int class = get_size_class(size);
-  if (class >= 0) {
-    void* ptr = pop_from_class(class);
-    if (ptr) return ptr;
-  } 
-
-  int list_index = get_free_list_index(size);
-  if (list_index >= 0) {
-    block_header_t** prev_ptr = &free_list[list_index];
-    block_header_t* current_block = free_list[list_index];
-    block_header_t* best_fit = NULL;
-    block_header_t** best_prev = NULL;  
-    while (current_block != NULL) {
-      if (current_block->size >= size) {
-        if (best_fit == NULL || current_block->size < best_fit->size) {
-          best_fit = current_block;
-          best_prev = prev_ptr;
-        }
-      }
-      prev_ptr = &current_block->next;
-      current_block = current_block->next;
-    }
-
-    if (best_fit) {
-      *best_prev = best_fit->next;  
-
-      size_t remaining_size = best_fit->size - size;
-      size_t min_split_size = sizeof(block_header_t) + ALIGNMENT;  
-      
-      // split block only if remainder is usable
-      if (remaining_size >= min_split_size) {
-        char* split_point = (char*)header_to_user(best_fit) + size;
-        block_header_t* new_block = (block_header_t*)split_point;
-        new_block->size = remaining_size - sizeof(block_header_t);
-        new_block->is_free = 1;
-        int new_list_index = get_free_list_index(new_block->size);
-        new_block->next = free_list[new_list_index];
-        free_list[new_list_index] = new_block;
-        best_fit->size = size;
-      }  
-      
-      best_fit->is_free = 0;
-      best_fit->next = NULL;
-      
-      return header_to_user(best_fit);
-    }
-  }  
-
-  size_t total_size = sizeof(block_header_t) + size;  
   
-  if (current + total_size > heap + heap_capacity) {  if (grow_heap(total_size) != 0) { return NULL; } }  
+  /* Align size and enforce minimum block size */
+  size = align_size(size);
+  if (size < TLSF_MIN_BLOCK_SIZE) { size = TLSF_MIN_BLOCK_SIZE; }
+
+  /* Search for suitable block using TLSF bitmap search */
+  tlsf_block_t* block = search_suitable_block(tlsf_ctrl, size);
+
+  /* If no block found, grow heap and create new free block */
+  if (block == NULL) {
+    size_t needed = sizeof(tlsf_block_t) + size;
+    if (grow_heap(needed) != 0) { return NULL; /* Heap growth failed */ }
+    
+    /* Try searching again after heap growth */
+    block = search_suitable_block(tlsf_ctrl, size);
+    if (block == NULL) { return NULL; /* Should not happen after successful growth */ } 
+  }
+
+  /* Remove block from free list */
+  remove_free_block(tlsf_ctrl, block);
+
+  /* Split block if it's significantly larger than needed */
+  tlsf_block_t* remainder = split_block(block, size);
+  if (remainder) { insert_free_block(tlsf_ctrl, remainder); /* Insert remainder back into free lists */ }
   
-  block_header_t* header = (block_header_t*)current;
-  header->size = size;
-  header->is_free = 0;
-  header->next = NULL;  
-  current += total_size;
-  total_allocated += total_size;  
+  /* Mark block as used */
+  block_set_used(block);
   
-  return header_to_user(header);
+  /* Update next block's prev_free flag */
+  tlsf_block_t* next = block_next(block);
+  if (next) { block_set_prev_used(next); }
+
+  /* Return user pointer (skip past block header) */
+  return block_to_user(block);
 }
 
 /*
- * Returns blocks to appropriate free list (or size class for small blocks).
- * Performs forward and backward coalescing to reduce fragmentation.
- * Large blocks (>=1MB) are unmapped immediately.
+ * TLSF deallocation with immediate coalescing
+ * 
+ * Strategy:
+ * 1. Large blocks (>=1MB): direct mmap
+ * 2. Mark block as free
+ * 3. Coalesce with adjacent free blocks
+ * 4. Insert into TLSF free lists
  */
 void mm_free(void* ptr) {
+  /* Edge case: NULL pointer */
   if (ptr == NULL) return;
-  
-  // check if this is a large allocation that should be unmapped
+
+  /* Check if this is a large allocation that should be unmapped */
   large_block_t** large_prev = &large_blocks;
   large_block_t* large_curr = large_blocks;
 
@@ -491,95 +710,81 @@ void mm_free(void* ptr) {
     large_curr = large_curr->next;
   }
 
-  block_header_t* header = user_to_header(ptr);
-  header->is_free = 1;  
-  int class = get_size_class(header->size);
+  /* Skip if TLSF not initialized (shouldn't happen in normal use) */
+  if (tlsf_ctrl == NULL) return;
 
-  if (class >= 0) {
-    header->next = size_classes[class];
-    size_classes[class] = header;
-    return;
-  } 
+  /* Get block from user pointer */
+  tlsf_block_t* block = (tlsf_block_t*)user_to_block(ptr);
 
-  // insert into free list sorted by address for efficient coalescing
-  int list_index = get_free_list_index(header->size);
-  block_header_t* curr = free_list[list_index];
-  block_header_t* prev = NULL;
-  
-  while (curr && (char*)curr < (char*)header) {
-    prev = curr;
-    curr = curr->next;
-  }
+  /* Mark block as free */
+  block_set_free(block);
 
-  header->next = curr;
-  if (prev) prev->next = header;
-  else free_list[list_index] = header;  
-  
-  // forward coalescing: merge with physically adjacent next block
-  char* block_end = (char*)header + sizeof(block_header_t) + header->size;
-  block_header_t* next = (block_header_t*)block_end;
-  
-  // bounds check required because block_end could be at heap boundary
-  if (heap != NULL &&
-      (char*)next >= heap &&
-      (char*)next < heap + heap_capacity &&
-      (char*)next + sizeof(block_header_t) <= heap + heap_capacity &&
-      next->is_free) {
-    int next_list_index = get_free_list_index(next->size);
+  /* Update next block's prev_free flag */
+  tlsf_block_t* next = block_next(block);
+  if (next && (char*)next < tlsf_ctrl->heap_end) { block_set_prev_free(next); }
 
-    block_header_t* next_curr = free_list[next_list_index];
-    block_header_t* next_prev = NULL;
+  /* Coalesce with adjacent free blocks (immediate coalescing) */
+  block = coalesce(tlsf_ctrl, block);
 
-    while (next_curr) {
-      if (next_curr == next) {
-        if (next_prev) next_prev->next = next_curr->next;
-        else free_list[next_list_index] = next_curr->next;
-        break;
-      }
-      next_prev = next_curr;
-      next_curr = next_curr->next;
-    }
-    header->size += sizeof(block_header_t) + next->size;
-    header->next = next->next;
-  }
-  
-  // backward coalescing: merge with physically adjacent previous block
-  curr = free_list[list_index];
-  prev = NULL;
-  
-  while (curr) {
-    char* curr_end = (char*)curr + sizeof(block_header_t) + curr->size;
-    
-    if (curr_end == (char*)header && curr->is_free) {
-      curr->size += sizeof(block_header_t) + header->size;
-      curr->next = header->next;
-      if (prev) prev->next = curr;
-      else free_list[list_index] = curr;
-      break;
-    }
-
-    prev = curr;
-    curr = curr->next;
-  }
+  /* Insert coalesced block into TLSF free lists */
+  insert_free_block(tlsf_ctrl, block);
 }
 
 /* Management */
-size_t get_total_allocated(void) { return total_allocated; }
-size_t get_free_space(void) { return heap_capacity - (current - heap); }
-block_header_t* get_free_list(void) { return free_list[0]; }
+size_t get_total_allocated(void) { 
+  if (!tlsf_ctrl) return 0;
+  
+  size_t free_space = get_free_space();
+  size_t usable_heap = heap_capacity - sizeof(tlsf_control_t);
+
+  if (free_space > usable_heap) return 0;
+  return usable_heap - free_space;
+}
+
+size_t get_free_space(void) { 
+  if (!tlsf_ctrl) return heap_capacity;
+  
+  size_t total_free = 0;
+
+  for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
+    if (!((tlsf_ctrl->fl_bitmap & (1U << fl)))) continue;
+
+    for (int sl = 0; sl < TLSF_SLI_COUNT; sl++) {
+      tlsf_block_t* block = tlsf_ctrl->blocks[fl][sl];
+
+      while (block != NULL) {
+        size_t size = block->size & TLSF_SIZE_MASK;
+        total_free += size + sizeof(tlsf_block_t); /* Include header overhead */
+        block = block->next_free;
+      }
+    }
+  }
+
+  return total_free; 
+}
 
 void reset_allocator(void) {
+  /* Cleanup large blocks */
   while (large_blocks) {
     large_block_t* next = large_blocks->next;
     munmap(large_blocks, large_blocks->size);
     large_blocks = next;
   }
 
-  if (heap) {
-    current = heap;
-    heap_size = 0;
+  if (heap && tlsf_ctrl) {
+    /* Reset heap pointer to start of allcoatable space */
+    current = tlsf_ctrl->heap_start;
 
-    for (int i = 0; i < NUM_FREE_LISTS; i++) free_list[i] = NULL;
-    for (int i = 0; i < NUM_SIZE_CLASSES; i++) size_classes[i] = NULL;
+    /* Zero out TLSF bitmaps */
+    tlsf_ctrl->fl_bitmap = 0;
+    memset(tlsf_ctrl->sl_bitmap, 0, sizeof(tlsf_ctrl->sl_bitmap));
+
+    /* Zero out TLSF block matrix */
+    memset(tlsf_ctrl->blocks, 0, sizeof(tlsf_ctrl->blocks));
+
+    /* Recreate initial free block */
+    size_t initial_free_size = heap + heap_capacity - current;
+    if (initial_free_size >= sizeof(tlsf_block_t) + TLSF_MIN_BLOCK_SIZE) { create_free_block(tlsf_ctrl, current, initial_free_size); }
   }
+
 }
