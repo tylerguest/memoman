@@ -132,20 +132,24 @@ int main() {
   
   double t_mem = test_memoman_linear(num_allocs, alloc_size);
   double t_mal = test_malloc_linear(num_allocs, alloc_size);
-  
+
   printf("memoman: %.6f s\n", t_mem);
-  printf("malloc:  %.6f s\n", t_mal);
-  printf("Ratio:   malloc is %.2fx faster\n", t_mem/t_mal);
+  printf("malloc: %.6f s\n", t_mal);
+  
+  if (t_mal < t_mem) { printf("Result:  malloc is %.2fx faster\n", t_mem / t_mal); }
+  else { printf("Result:  memoman is %.2fx faster \n", t_mal / t_mem); }
 
   printf("\n--- Test 2: Random Free (Fragmentation Stress) ---\n");
   printf("Allocating %d blocks, shuffling, freeing, 50 times.\n", num_allocs);
   
   t_mem = test_memoman_random(num_allocs, alloc_size);
   t_mal = test_malloc_random(num_allocs, alloc_size);
-  
+
   printf("memoman: %.6f s\n", t_mem);
-  printf("malloc:  %.6f s\n", t_mal);
-  printf("Ratio:   malloc is %.2fx faster\n", t_mem/t_mal);
+  printf("malloc: %.6f s\n", t_mal);
+  
+  if (t_mal < t_mem) { printf("Result:  malloc is %.2fx faster\n", t_mem / t_mal); }
+  else { printf("Result:  memoman is %.2fx faster \n", t_mal / t_mem); }
 
   return 0;
 }
