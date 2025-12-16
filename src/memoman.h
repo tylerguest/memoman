@@ -9,12 +9,14 @@
 #define TLSF_FLI_MAX 30                    // log2(1GB) for max pool size
 #define TLSF_SLI 5                         // Second level index (2^5 = 32 bins)
 #define TLSF_SLI_COUNT (1 << TLSF_SLI)     // 32 second-level bins
-#define TLSF_FLI_OFFSET 6                  // Offset for minimum block size
+#define TLSF_FLI_OFFSET 4                  // Offset for minimum block size
 
 /* Block flag macros - stored in LSBs of size field */
 #define TLSF_BLOCK_FREE (1 << 0)           // Is block free?
 #define TLSF_PREV_FREE (1 << 1)            // Is previous physical block free?
 #define TLSF_SIZE_MASK (~(size_t)3)        // Mask to extract actual size
+
+/* Global variables */
 
 /*
  * TLSF block header with boundary tags and free list pointers
