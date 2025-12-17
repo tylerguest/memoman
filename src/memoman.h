@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 /* TLSF Configuration */
+#define LARGE_BLOCK_MAGIC 0xDEADB10C      // For O(1) detection
 #define TLSF_MIN_BLOCK_SIZE 16             // Mininum allocatable block
 #define TLSF_FLI_MAX 30                    // log2(1GB) for max pool size
 #define TLSF_SLI 5                         // Second level index (2^5 = 32 bins)
@@ -56,6 +57,7 @@ typedef struct {
  * These bypass TLSF and use direct mmap.
  */
 typedef struct large_block {
+  uint32_t magic;
   size_t size;
   struct large_block* next;
 } large_block_t;
@@ -108,7 +110,7 @@ void reset_allocator(void);
  * Shows total heap size, used space, free space, and usage percentage.
  */
 void print_heap_stats(void);
-
+                                                                                              
 /*
  * Display all blocks in the free list
  * 

@@ -568,6 +568,7 @@ void mm_destroy(void) {
   /* Cleanup large blocks */
   while (large_blocks) {
     large_block_t* next = large_blocks->next;
+    large_blocks->magic = 0;  // Clear magic before unmap
     munmap(large_blocks, large_blocks->size);
     large_blocks = next;
   }
@@ -641,6 +642,7 @@ void* mm_malloc(size_t size) {
     if (ptr == MAP_FAILED) return NULL;
 
     large_block_t* block = (large_block_t*)ptr;
+    block->magic = LARGE_BLOCK_MAGIC; 
     block->size = total_size;
     block->next = large_blocks;
     large_blocks = block;
@@ -696,18 +698,25 @@ void mm_free(void* ptr) {
   /* Edge case: NULL pointer */
   if (ptr == NULL) return;
 
-  /* Check if this is a large allocation that should be unmapped */
-  large_block_t** large_prev = &large_blocks;
-  large_block_t* large_curr = large_blocks;
+  /* O(1) large block detection using magic number */
+  large_block_t* potential_large = (large_block_t*)((char*)ptr - sizeof(large_block_t));
+  if (potential_large->magic == LARGE_BLOCK_MAGIC) {
+    /* Remove from linked list */
+    large_block_t** large_prev = &large_blocks;
+    large_block_t* large_curr = large_blocks;
 
-  while(large_curr) {
-    if ((char*)large_curr + sizeof(large_block_t) == ptr) {
-      *large_prev = large_curr->next;
-      munmap(large_curr, large_curr->size);
-      return;
+    while (large_curr) {
+      if (large_curr == potential_large) {
+        *large_prev = large_curr->next;
+        potential_large->magic = 0;  // Clear magic before unmap
+        munmap(potential_large, potential_large->size);
+        return;
+      }
+      large_prev = &large_curr->next;
+      large_curr = large_curr->next;
     }
-    large_prev = &large_curr->next;
-    large_curr = large_curr->next;
+    /* Magic matched but not in list - corrupted or double-free */
+    return;
   }
 
   /* Skip if TLSF not initialized (shouldn't happen in normal use) */
@@ -767,6 +776,7 @@ void reset_allocator(void) {
   /* Cleanup large blocks */
   while (large_blocks) {
     large_block_t* next = large_blocks->next;
+    large_blocks->magic = 0;  // Clear magic before unmap
     munmap(large_blocks, large_blocks->size);
     large_blocks = next;
   }
