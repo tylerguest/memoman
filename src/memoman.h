@@ -60,6 +60,7 @@ typedef struct large_block {
   uint32_t magic;
   size_t size;
   struct large_block* next;
+  struct large_block* prev;
 } large_block_t;
 
 /* Legacy type - to be removed */

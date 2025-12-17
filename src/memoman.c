@@ -644,7 +644,9 @@ void* mm_malloc(size_t size) {
     large_block_t* block = (large_block_t*)ptr;
     block->magic = LARGE_BLOCK_MAGIC; 
     block->size = total_size;
+    block->prev = NULL;
     block->next = large_blocks;
+    if (large_blocks) { large_blocks->prev = block; }
     large_blocks = block;
 
     return (char*)ptr + sizeof(large_block_t);
@@ -701,21 +703,14 @@ void mm_free(void* ptr) {
   /* O(1) large block detection using magic number */
   large_block_t* potential_large = (large_block_t*)((char*)ptr - sizeof(large_block_t));
   if (potential_large->magic == LARGE_BLOCK_MAGIC) {
-    /* Remove from linked list */
-    large_block_t** large_prev = &large_blocks;
-    large_block_t* large_curr = large_blocks;
+    /* O(1) doubly-linked list removal */
+    if (potential_large->prev) { potential_large->prev->next = potential_large->next; }
+    else { large_blocks = potential_large->next; }  // Was head of list
+    
+    if (potential_large->next) { potential_large->next->prev = potential_large->prev; }
 
-    while (large_curr) {
-      if (large_curr == potential_large) {
-        *large_prev = large_curr->next;
-        potential_large->magic = 0;  // Clear magic before unmap
-        munmap(potential_large, potential_large->size);
-        return;
-      }
-      large_prev = &large_curr->next;
-      large_curr = large_curr->next;
-    }
-    /* Magic matched but not in list - corrupted or double-free */
+    potential_large->magic = 0;  // Clear magic before unmap
+    munmap(potential_large, potential_large->size);
     return;
   }
 
