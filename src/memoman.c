@@ -372,6 +372,9 @@ static inline tlsf_block_t* split_block(tlsf_block_t* block, size_t size) {
     next->prev_phys = remainder; 
     /* Update next block's prev_phys pointer */
     block_set_prev_free(next);
+  } else {
+    /* Remainder is now the last physical block */
+    if (tlsf_ctrl) { tlsf_ctrl->last_block = remainder; }
   }
   
   return remainder;
@@ -414,6 +417,9 @@ static inline tlsf_block_t* coalesce_next(tlsf_control_t* ctrl, tlsf_block_t* bl
 
   if (!next || !block_is_free(next)) { return block; }
 
+  /* Check if we're absorbing the last block */
+  int absorbing_last = (ctrl && ctrl->last_block == next);
+
   /* Remove next from free list */
   remove_free_block(ctrl, next);
 
@@ -424,6 +430,9 @@ static inline tlsf_block_t* coalesce_next(tlsf_control_t* ctrl, tlsf_block_t* bl
   /* Update next-next block's prev_phys to point to merged block */
   tlsf_block_t* next_next = block_next(block);
   if(next_next) { next_next->prev_phys = block; }
+
+  /* Update last_block if we absorbed it */
+  if (absorbing_last) { ctrl->last_block = block; }
 
   return block;
 }
@@ -475,23 +484,14 @@ static void create_free_block(tlsf_control_t* ctrl, void* start, size_t size) {
   block->prev_free = NULL;
 
   /* Find previous physical block by searching backward from start */
-  tlsf_block_t* prev_block = NULL;
+  tlsf_block_t* prev_block = ctrl->last_block;
 
-  /* Search through all free lists to find physically adjacent previous block */
-  for (int fl = 0; fl < TLSF_FLI_MAX && !prev_block; fl++) {
-    for (int sl = 0; sl < TLSF_SLI_COUNT && !prev_block; sl++) {
-      tlsf_block_t* curr = ctrl->blocks[fl][sl];
-      while (curr) {
-        char* curr_end = (char*)curr + sizeof(tlsf_block_t) + block_size(curr);
-        if (curr_end == (char*)block) {
-          prev_block = curr;
-          break;
-        }
-        curr = curr->next_free;
-      }
-    }
+  /* Verify it's actually adjacent (should always be true for heap growth) */
+  if (prev_block) {
+    char* prev_end = (char*)prev_block + sizeof(tlsf_block_t) + block_size(prev_block);
+    if (prev_end != (char*)block) { prev_block = NULL;  /* Not adjacent - shouldn't happen in normal use */ }
   }
-  
+
   /* Set up physical linkage */
   block->prev_phys = prev_block;
   
@@ -507,8 +507,14 @@ static void create_free_block(tlsf_control_t* ctrl, void* start, size_t size) {
     block_set_prev_used(block);
   }
 
+  /* This new block is now the last physical block */
+  ctrl->last_block = block;
+
   /* Try to coalesce with adjacent blocks */
   block = coalesce(ctrl, block);
+
+  /* After coalescing, the merged block is still the last block */
+  ctrl->last_block = block;
 
   /* Insert into TLSF free lists */
   insert_free_block(ctrl, block);
@@ -556,6 +562,7 @@ int mm_init(void) {
   tlsf_ctrl->heap_start = current;
   tlsf_ctrl->heap_end = heap + heap_capacity;
   tlsf_ctrl->heap_capacity = heap_capacity;
+  tlsf_ctrl->last_block = NULL;  /* Will be set by create_free_block */
 
   /* Create initial free block spanning usable heap */
   size_t initial_free_size = heap + heap_capacity - current;
@@ -786,6 +793,9 @@ void reset_allocator(void) {
 
     /* Zero out TLSF block matrix */
     memset(tlsf_ctrl->blocks, 0, sizeof(tlsf_ctrl->blocks));
+
+    /* Reset last block tracking */
+    tlsf_ctrl->last_block = NULL;
 
     /* Recreate initial free block */
     size_t initial_free_size = heap + heap_capacity - current;

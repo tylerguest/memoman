@@ -50,6 +50,9 @@ typedef struct {
   char* heap_start;                         // Start of allocatable heap
   char* heap_end;                           // End of committed heap
   size_t heap_capacity;                     // Total committed capacity
+
+  /* O(1) wilderness tracking */
+  tlsf_block_t* last_block;                 // Last physical block in heap
 } tlsf_control_t;
 
 /*
