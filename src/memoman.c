@@ -707,38 +707,61 @@ void mm_free(void* ptr) {
   /* Edge case: NULL pointer */
   if (ptr == NULL) return;
 
-  /* O(1) large block detection using magic number */
-  large_block_t* potential_large = (large_block_t*)((char*)ptr - sizeof(large_block_t));
-  if (potential_large->magic == LARGE_BLOCK_MAGIC) {
-    /* O(1) doubly-linked list removal */
-    if (potential_large->prev) { potential_large->prev->next = potential_large->next; }
-    else { large_blocks = potential_large->next; }  // Was head of list
-    
-    if (potential_large->next) { potential_large->next->prev = potential_large->prev; }
-
-    potential_large->magic = 0;  // Clear magic before unmap
-    munmap(potential_large, potential_large->size);
-    return;
-  }
-
   /* Skip if TLSF not initialized (shouldn't happen in normal use) */
   if (tlsf_ctrl == NULL) return;
 
-  /* Get block from user pointer */
-  tlsf_block_t* block = (tlsf_block_t*)user_to_block(ptr);
+  /* Check if pointer is within heap bounds */
+  if ((char*)ptr >= tlsf_ctrl->heap_start && (char*)ptr < tlsf_ctrl->heap_end) {
+    /* Within heap - handle as TLSF block */
+    tlsf_block_t* block = (tlsf_block_t*)user_to_block(ptr);
 
-  /* Mark block as free */
-  block_set_free(block);
+    /* Additional validation: block header must also be within bounds */
+    if ((char*)block < tlsf_ctrl->heap_start) {
+      return; /* Block header would be before heap start */
+    }
 
-  /* Update next block's prev_free flag */
-  tlsf_block_t* next = block_next(block);
-  if (next && (char*)next < tlsf_ctrl->heap_end) { block_set_prev_free(next); }
+    /* Mark block as free */
+    block_set_free(block);
 
-  /* Coalesce with adjacent free blocks (immediate coalescing) */
-  block = coalesce(tlsf_ctrl, block);
+    /* Update next block's prev_free flag */
+    tlsf_block_t* next = block_next(block);
+    if (next && (char*)next < tlsf_ctrl->heap_end) { block_set_prev_free(next); }
 
-  /* Insert coalesced block into TLSF free lists */
-  insert_free_block(tlsf_ctrl, block);
+    /* Coalesce with adjacent free blocks (immediate coalescing) */
+    block = coalesce(tlsf_ctrl, block);
+
+    /* Insert coalesced block into TLSF free lists */
+    insert_free_block(tlsf_ctrl, block);
+    return;
+  }
+
+  /* Pointer is outside heap - check if it's a large block */
+  large_block_t* potential_large = (large_block_t*)((char*)ptr - sizeof(large_block_t));
+
+  /* Walk large_blocks list to verify this is one of ours */
+  large_block_t* lb = large_blocks;
+  while (lb) {
+    if (lb == potential_large) {
+      /* Found it - safe to dereference now */
+      if (lb->magic == LARGE_BLOCK_MAGIC) {
+        /* O(1) doubly-linked list removal */
+        if (lb->prev) { lb->prev->next = lb->next; }
+        else { large_blocks = lb->next; }
+
+        if (lb->next) { lb->next->prev = lb->prev; }
+
+        lb->magic = 0;
+        munmap(lb, lb->size);
+        return;
+      }
+    }
+    lb = lb->next;
+  }
+
+  /* Invalid pointer - not in heap and not a known large block */
+#ifdef DEBUG_OUTPUT
+  fprintf(stderr, "mm_free: invalid pointer %p (heap: %p-%p)\n", ptr, (void*)tlsf_ctrl->heap_start, (void*)tlsf_ctrl->heap_end);
+#endif
 }
 
 /* Management */

@@ -3,6 +3,10 @@
 
 int main() {
   printf("=== Heap Overflow Test ===\n");  
+
+  /* Initialize allocator */
+  void* init = mm_malloc(1);
+  mm_free(init);
   
   printf("1. Initial state:\n");
   print_heap_stats();  
