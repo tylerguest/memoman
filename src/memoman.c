@@ -773,16 +773,6 @@ void mm_free(void* ptr) {
 }
 
 /* Management */
-size_t get_total_allocated(void) { 
-  if (!tlsf_ctrl) return 0;
-  
-  size_t free_space = get_free_space();
-  size_t usable_heap = heap_capacity - sizeof(tlsf_control_t);
-
-  if (free_space > usable_heap) return 0;
-  return usable_heap - free_space;
-}
-
 size_t get_free_space(void) { 
   if (!tlsf_ctrl) return heap_capacity;
   
@@ -803,6 +793,51 @@ size_t get_free_space(void) {
   }
 
   return total_free; 
+}
+
+size_t mm_get_usable_size(void* ptr) {
+  /* NULL pointer has no size */
+  if (ptr == NULL) return 0;
+
+  /* Check if TLSF is initialized */
+  if (tlsf_ctrl == NULL) return 0;
+
+  /* Check if pointer is within heap bounds (TLSF block) */
+  if ((char*)ptr >= tlsf_ctrl->heap_start && (char*)ptr < tlsf_ctrl->heap_end) {
+    tlsf_block_t* block = (tlsf_block_t*)user_to_block(ptr);
+
+    /* Validate block header is within bounds */
+    if ((char*)block < tlsf_ctrl->heap_start) return 0;
+
+    /* Return the block's data size */
+    return block_size(block);
+  }
+
+  /* Check if it's a large block (mmap'd) */
+  large_block_t* potential_large = (large_block_t*)((char*)ptr - sizeof(large_block_t));
+
+  /* Walk large_blocks list to verify */
+  large_block_t* lb = large_blocks;
+  while(lb) {
+    if (lb == potential_large && lb->magic == LARGE_BLOCK_MAGIC) {
+      /* Return usable size (total - header) */
+      return lb->size - sizeof(large_block_t);
+    }
+    lb = lb->next;
+  }
+
+  /* Invalid pointer */
+  return 0;
+}
+
+size_t get_total_allocated(void) { 
+  if (!tlsf_ctrl) return 0;
+  
+  size_t free_space = get_free_space();
+  size_t usable_heap = heap_capacity - sizeof(tlsf_control_t);
+
+  if (free_space > usable_heap) return 0;
+  return usable_heap - free_space;
 }
 
 void reset_allocator(void) {

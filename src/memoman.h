@@ -136,6 +136,17 @@ size_t get_total_allocated(void);
  */
 size_t get_free_space(void);
 
+/*
+ * Get usable size of an allocated block
+ *
+ * @param ptr Pointer returned by mm_malloc
+ * #@return Usable size in bytes, or 0 if ptr is invalid
+ *
+ * Returns the actual usable size which may be large than requested
+ * due to alignement and mininum block size requirements.
+ */
+size_t mm_get_usable_size(void* ptr);
+
 block_header_t* get_free_list(void);
 
-#endif
+#endif 
