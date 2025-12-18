@@ -147,6 +147,18 @@ size_t get_free_space(void);
  */
 size_t mm_get_usable_size(void* ptr);
 
+/*
+ * Allocate zero-initialized memory
+ * 
+ * @param nmemb Number of elements
+ * @param size Size of each element
+ * @return Pointer to zero-initialized memory, or NULL on failur
+ *
+ * Checks for overflow in nmemb * size multiplication
+ * Equivalent to malloc(nmemb * size) followed by memset to zero
+ */
+void* mm_calloc(size_t nmemb, size_t size);
+
 block_header_t* get_free_list(void);
 
 #endif 

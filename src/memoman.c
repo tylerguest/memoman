@@ -830,6 +830,26 @@ size_t mm_get_usable_size(void* ptr) {
   return 0;
 }
 
+void* mm_calloc(size_t nmemb, size_t size) {
+  /* check for multiplication overflow */
+  if (nmemb != 0 && size > SIZE_MAX / nmemb) {
+    return NULL; /* Overflow would occur */
+  }
+
+  size_t total = nmemb * size;
+
+  /* Handle zero-size allocation */
+  if (total == 0) { return NULL; }
+
+  void* ptr = mm_malloc(total);
+  if (ptr == NULL) { return NULL; }
+
+  /* Zero-initialize the memory */
+  memset(ptr, 0, total);
+  
+  return ptr;
+}
+
 size_t get_total_allocated(void) { 
   if (!tlsf_ctrl) return 0;
   
