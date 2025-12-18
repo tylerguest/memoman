@@ -1,11 +1,19 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -g
+CFLAGS = -Wall -Wextra -std=c99
 LDFLAGS =
 DEBUG_FLAGS = -g -DDEBUG_OUTPUT
 BENCHMARK_FLAGS = -O3 -march=native -DNDEBUG
 
 # Ensure output directory exists before anything else
 $(shell mkdir -p tests/bin)
+
+# Auto-detect all test files
+TEST_SOURCES = $(wildcard tests/test*.c)
+# Convert .c filenames to bin filenames for the target list
+TESTS = $(patsubst tests/%.c,tests/bin/%,$(TEST_SOURCES))
+
+all: CFLAGS += $(DEBUG_FLAGS)
+all: $(TESTS)
 
 # --- EXCEPTION RULE: White-Box Testing ---
 # 1. Matches ONLY test_mapping_unit
@@ -17,14 +25,6 @@ tests/bin/test_mapping_unit: tests/test_mapping_unit.c src/memoman.c src/mmdebug
 # Matches all other tests and links memoman.c normally
 tests/bin/%: tests/%.c src/memoman.c src/mmdebug.c src/memoman.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/memoman.c src/mmdebug.c $<
-
-# Auto-detect all test files
-TEST_SOURCES = $(wildcard tests/test*.c)
-# Convert .c filenames to bin filenames for the target list
-TESTS = $(patsubst tests/%.c,tests/bin/%,$(TEST_SOURCES))
-
-all: CFLAGS += $(DEBUG_FLAGS)
-all: $(TESTS)
 
 benchmark: CFLAGS += $(BENCHMARK_FLAGS)
 benchmark: LDFLAGS += -lrt
