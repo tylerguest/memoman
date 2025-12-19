@@ -159,6 +159,22 @@ size_t mm_get_usable_size(void* ptr);
  */
 void* mm_calloc(size_t nmemb, size_t size);
 
+/* 
+ * Reallocate memory block to new size
+ * 
+ * @param ptr Pointer to existing allocation (or NULL)
+ * @param size New size in bytes
+ * @return Pointer to resized memory, or NULL on failure
+ *
+ * Behavior:
+ * - ptr == NULL: equivalent to mm_malloc(size)
+ * - size == 0: equivalent to mm_free(ptr), returns NULL
+ * - Otherwise: allocates new block, copies data, frfees old block
+ *
+ * If allocation fails, original block is unchanged and NULL is returned
+ */
+void* mm_realloc(void* ptr, size_t size);
+
 block_header_t* get_free_list(void);
 
 #endif 

@@ -850,6 +850,40 @@ void* mm_calloc(size_t nmemb, size_t size) {
   return ptr;
 }
 
+void* mm_realloc(void* ptr, size_t size) {
+  /* Edge case: NULL pointer - equivalent to malloc */
+  if (ptr == NULL) { return mm_malloc(size); }
+
+  /* Edge case: size == 0 - equivalent to free */
+  if (size == 0) {
+    mm_free(ptr);
+    return NULL;
+  }
+
+  /* Get old block size */
+  size_t old_size = mm_get_usable_size(ptr);
+  if (old_size == 0) {
+    /* Invalid pointer */
+    return NULL;
+  }
+
+  /* Allocate new block */
+  void* new_ptr = mm_malloc(size);
+  if (new_ptr == NULL) {
+    /* Allocation failed - original block unchanged */
+    return NULL;
+  }
+
+  /* Copt data from old to new (up to mininum of old/new sizes) */
+  size_t copy_size = (old_size < size) ? old_size : size;
+  memcpy(new_ptr, ptr, copy_size);
+
+  /* Free old block */
+  mm_free(ptr);
+
+  return new_ptr;
+}
+
 size_t get_total_allocated(void) { 
   if (!tlsf_ctrl) return 0;
   
