@@ -26,9 +26,9 @@ tests/bin/test_mapping_unit: tests/test_mapping_unit.c src/memoman.c src/mmdebug
 tests/bin/%: tests/%.c src/memoman.c src/mmdebug.c src/memoman.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/memoman.c src/mmdebug.c $<
 
-benchmark: CFLAGS += $(BENCHMARK_FLAGS)
-benchmark: LDFLAGS += -lrt
-benchmark: clean $(TESTS)
+benchmark: clean
+	@mkdir -p tests/bin
+	@$(MAKE) CFLAGS="$(CFLAGS) $(BENCHMARK_FLAGS)" LDFLAGS="$(LDFLAGS) -lrt" $(TESTS)
 	@echo "Built with optimizations for benchmarking"
 
 debug: CFLAGS += $(DEBUG_FLAGS)
