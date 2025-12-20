@@ -7,7 +7,7 @@
 #include <string.h>
 
 /* Configuration */
-#define ALIGNMENT 8
+#define ALIGNMENT 16
 #define LARGE_ALLOC_THRESHOLD (1024 * 1024)
 
 /* Heap management */
