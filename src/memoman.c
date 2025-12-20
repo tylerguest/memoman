@@ -867,14 +867,98 @@ void* mm_realloc(void* ptr, size_t size) {
     return NULL;
   }
 
-  /* Allocate new block */
+  /* Align requested size */
+  size_t aligned_size = align_size(size);
+  if (aligned_size < TLSF_MIN_BLOCK_SIZE) { aligned_size = TLSF_MIN_BLOCK_SIZE; }
+
+  /* Check if this is a TLSF block or large block */
+  int is_tlsf_block = ((char*)ptr >= tlsf_ctrl->heap_start && (char*)ptr < tlsf_ctrl->heap_end);
+
+  /* In-place shrink for TLSF blocks */
+  if (aligned_size <= old_size  && is_tlsf_block) {
+    tlsf_block_t* block = user_to_block(ptr);
+    size_t block_total_size = block_size(block);
+
+    /* Check if remainder would be usable after split */
+    size_t min_split_size = TLSF_MIN_BLOCK_SIZE + sizeof(tlsf_block_t);
+
+    if (block_total_size >= aligned_size + min_split_size) {
+      /* Split block in place - return same pointer */
+      tlsf_block_t* remainder = split_block(block, aligned_size);
+
+      if (remainder) {
+        /* Mark remainder as free and insert into free lists */
+        block_mark_as_free(remainder);
+
+        /* Coalesce remainder with adjacent free blocks */
+        remainder = coalesce(tlsf_ctrl, remainder);
+
+        /* Insert into TLSF free lists */
+        insert_free_block(tlsf_ctrl, remainder);
+      }
+
+      /* Return same pointer - no data movement needed */
+      return ptr;
+    }
+
+    /* Remainder too small to split - keep existing block as-is */
+    return ptr;
+  }
+
+  /* Phase 3.2: In-place grow for TLSF blocks */
+  if (is_tlsf_block && aligned_size > old_size) {
+    tlsf_block_t* block = user_to_block(ptr);
+    tlsf_block_t* next = block_next(block);
+
+    /* Check if next block exists, is free, and provides enough space */
+    if (next && block_is_free(next)) {
+      size_t current_size = block_size(block);
+      size_t next_size = block_size(next);
+      size_t combined_size = current_size + sizeof(tlsf_block_t) + next_size;
+
+      /* Check if combined size is sufficient */
+      if (combined_size >= aligned_size) {
+        /* Remove next block from free list */
+        remove_free_block(tlsf_ctrl, next);
+
+        /* Absorb next block into current block */
+        block_set_size(block, combined_size);
+
+        /* Update physical linkage */
+        tlsf_block_t* next_next = block_next(block);
+        if (next_next) {
+          next_next->prev_phys = block;
+          block_set_prev_used(next_next);
+        }
+
+        /* Update last_block tracking if we absorbed the last block */
+        if (tlsf_ctrl->last_block == next) { tlsf_ctrl->last_block = block; }
+
+        /* Now try to split if we have excess space */
+        size_t min_split_size = TLSF_MIN_BLOCK_SIZE + sizeof(tlsf_block_t);
+        if (combined_size >= aligned_size + min_split_size) {
+          tlsf_block_t* remainder = split_block(block, aligned_size);
+          if (remainder) {
+            block_mark_as_free(remainder);
+            remainder = coalesce(tlsf_ctrl, remainder);
+            insert_free_block(tlsf_ctrl, remainder);
+          }
+        }
+
+        /* Return same pointer - grown in place! */
+        return ptr;
+      }
+    }
+  }
+
+  /* Can't shrink in place (large block or growing) - fallback to malloc+copy+free */
   void* new_ptr = mm_malloc(size);
   if (new_ptr == NULL) {
     /* Allocation failed - original block unchanged */
     return NULL;
   }
 
-  /* Copt data from old to new (up to mininum of old/new sizes) */
+  /* Copy data from old to new (up to mininum of old/new sizes) */
   size_t copy_size = (old_size < size) ? old_size : size;
   memcpy(new_ptr, ptr, copy_size);
 
