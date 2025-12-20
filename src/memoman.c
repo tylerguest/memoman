@@ -746,12 +746,12 @@ void mm_free(void* ptr) {
       return; /* Block header would be before heap start */
     }
 
-    /* Check if block is already free (double-free detection) */
+    /* Double-free detection: check if block is already free */
     if (block_is_free(block)) {
 #ifdef DEBUG_OUTPUT
       fprintf(stderr, "mm_free: double-free detected at %p\n", ptr);
 #endif
-      return;
+      return;  /* Already free - silently ignore to prevent corruption */
     }
 
     /* Mark block as free */
