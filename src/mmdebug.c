@@ -12,6 +12,7 @@ extern tlsf_control_t* tlsf_ctrl;
  * formatted for easy reading (groups of 4).
  * Example: ....1010
  */
+__attribute__((unused))
 static void print_bitmap_visual(uint32_t bitmap) {
     printf(" [");
     // Iterate from MSB (31) to LSB (0)
@@ -25,6 +26,7 @@ static void print_bitmap_visual(uint32_t bitmap) {
 /* * Helper: Calculates and prints the size range for a specific FL/SL bin.
  * This helps verify if a block is in the correct list.
  */
+__attribute__((unused))
 static void print_sl_range(int fl, int sl) {
     // 1. Calculate the base size of this FL (2^fl * offset)
     // Note: fl is the index (0..31), real FL is fl + TLSF_FLI_OFFSET

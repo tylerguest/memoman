@@ -35,8 +35,7 @@ int main() {
   reset_allocator();
   extern char* heap;
   heap = NULL;  // force re-init
-  void* p1 = mm_malloc(100);
-  assert(p1 != NULL);
+  assert(mm_malloc(100) != NULL);
   assert(heap != NULL);
   printf("\n    heap initialized at: %p\n", heap);
   printf("    PASSED\n");
@@ -54,16 +53,14 @@ int main() {
 
   // allocate enough to trigger heap growth (1MB initial)
   for (int i = 0; i < 100; i++) {
-    void* p = mm_malloc(10000);
-    assert(p != NULL);
+    assert(mm_malloc(10000) != NULL);
   }
   
   printf("    capacity after growth: %zu bytes\n", heap_capacity);
   printf("    pointer still at: %p (unchanged)\n", first);
 
   // verify original pointer still valid
-  unsigned char* check = (unsigned char*)first;
-  for (int i = 0; i < 100; i++) { assert(check[i] == 0x42); }
+  for (int i = 0; i < 100; i++) { assert(((unsigned char*)first)[i] == 0x42); }
   printf("    data integrity verified\n");
   printf("    PASSED\n");
 
@@ -105,15 +102,13 @@ int main() {
   // allocate exactly to 1MB boundary
   size_t allocated = 0;
   while (allocated < 1024 * 1024 - 1024) {
-    void* p = mm_malloc(1000);
-    assert(p != NULL);
+    assert(mm_malloc(1000) != NULL);
     allocated += 1000 + sizeof(block_header_t);
   }
   printf("    allocated up to boundary: %zu bytes\n", allocated);
 
   // this should trigger first mprotect growth
-  void* trigger_growth = mm_malloc(10000);
-  assert(trigger_growth != NULL);
+  assert(mm_malloc(10000) != NULL);
   
   printf("    capacity after growth: %zu bytes\n", heap_capacity);
   printf("    growth factor: %.1fx\n", (double)heap_capacity / (1024.0 * 1024.0));

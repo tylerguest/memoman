@@ -26,8 +26,8 @@ int main() {
   
   srand(42);  
   
-  double your_times[trials];
-  double system_times[trials];  
+  double memoman_times[trials];
+  double glibc_times[trials];  
   
   for (int t = 0; t < trials; t++) {
     printf("Trial %d/%d\n", t + 1, trials);
@@ -56,8 +56,8 @@ int main() {
     }  
     for (int i = 0; i < active_count; i++) { mm_free(ptrs[i]); }  
     double end = get_time();
-    your_times[t] = end - start;  
-    printf("  Testing system malloc...\n");
+    memoman_times[t] = end - start;  
+    printf("  Testing glibc malloc...\n");
     start = get_time();  
     void* sys_ptrs[100];
     active_count = 0;  
@@ -78,23 +78,23 @@ int main() {
     }  
     for (int i = 0; i < active_count; i++) { free(sys_ptrs[i]); }  
     end = get_time();
-    system_times[t] = end - start;
+    glibc_times[t] = end - start;
   }  
-  double avg_your = 0, avg_system = 0;
+  double avg_memoman = 0, avg_glibc = 0;
   for (int t = 0; t < trials; t++) {
-    avg_your += your_times[t];
-    avg_system += system_times[t];
+    avg_memoman += memoman_times[t];
+    avg_glibc += glibc_times[t];
   }
-  avg_your /= trials;
-  avg_system /= trials;  
+  avg_memoman /= trials;
+  avg_glibc /= trials;  
   printf("\n=== AVERAGED RESULTS ===\n");
-  printf("Your allocator:     %.6f seconds\n", avg_your);
-  printf("System malloc:      %.6f seconds\n", avg_system);
+  printf("memoman:            %.6f seconds\n", avg_memoman);
+  printf("glibc malloc:       %.6f seconds\n", avg_glibc);
   printf("Difference:         %.2fx %s\n",
-         avg_system > avg_your ? avg_system / avg_your : avg_your / avg_system,
-         avg_system > avg_your ? "faster" : "slower");
+         avg_glibc > avg_memoman ? avg_glibc / avg_memoman : avg_memoman / avg_glibc,
+         avg_glibc > avg_memoman ? "faster" : "slower");
   printf("\nOperations per second:\n");
-  printf("Your allocator:     %.0f ops/sec\n", iterations / avg_your);
-  printf("System allocator:   %.0f ops/sec\n", iterations / avg_system);  
+  printf("memoman:            %.0f ops/sec\n", iterations / avg_memoman);
+  printf("glibc malloc:       %.0f ops/sec\n", iterations / avg_glibc);  
   return 0;
 }

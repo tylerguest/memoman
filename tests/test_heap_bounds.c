@@ -81,7 +81,7 @@ int main(void) {
   assert(d != NULL);
   
   mm_free(a);
-  mm_free(b);
+  mm_free(d);
   mm_free(c);
   printf("PASSED\n");
   

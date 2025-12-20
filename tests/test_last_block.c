@@ -40,8 +40,7 @@ int main() {
 
   /* Allocate enough to trigger heap growth */
   for (int i = 0; i < 100; i++) {
-    void* p = mm_malloc(10000);
-    assert(p != NULL);
+    assert(mm_malloc(10000) != NULL);
   }
 
   /* last_block should have moved after growth */
@@ -57,8 +56,7 @@ int main() {
 
   /* last_block should have no next physical block */
   tlsf_block_t* last = tlsf_ctrl->last_block;
-  char* last_end = (char*)last + sizeof(tlsf_block_t) + (last->size & (~(size_t)3));
-  assert(last_end <= tlsf_ctrl->heap_end);
+  assert((char*)last + sizeof(tlsf_block_t) + (last->size & (~(size_t)3)) <= tlsf_ctrl->heap_end);
   printf("PASSED\n");
 
   mm_free(a);

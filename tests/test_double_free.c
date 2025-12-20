@@ -30,8 +30,7 @@ int main(void) {
   assert(free_after_first > free_before);  /* Space increased after free */
 
   mm_free(p1);  /* Double free - should be detected and ignored */
-  size_t free_after_second = get_free_space();
-  assert(free_after_second == free_after_first);  /* No change - double free ignored */
+  assert(get_free_space() == free_after_first);  /* No change - double free ignored */
   printf("PASSED\n");
 
   /* Test 2: Triple free */
@@ -141,8 +140,7 @@ int main(void) {
     /* Attempting to "double-free" orig should work since it's actually reused/allocated */
     size_t before = get_free_space();
     mm_free(orig);  /* this is actually freeing 'reused' - valid */
-    size_t after = get_free_space();
-    assert(after > before);  /* Free space increased - block was freed */
+    assert(get_free_space() > before);  /* Free space increased - block was freed */
   } else { mm_free(reused); }
   printf("PASSED\n");
 
