@@ -68,9 +68,11 @@ static inline int mapping_sli(size_t size, int fl) {
  * Combined mapping function
  * Maps size to first-level and second-level indices
  * Handles mininum block size by adjusting FLI
+ * Optimized with branch prediction hints for common paths
  */
 static inline void mapping(size_t size, int* fl, int* sl) {
-  if (size < TLSF_MIN_BLOCK_SIZE) {
+  /* Fast path: size is usually >= min block size */
+  if (__builtin_expect(size < TLSF_MIN_BLOCK_SIZE, 0)) {
     *fl = 0;
     *sl = 0;
   } else {
@@ -78,11 +80,11 @@ static inline void mapping(size_t size, int* fl, int* sl) {
     *sl = mapping_sli(size, fli);
     *fl = fli - TLSF_FLI_OFFSET;
 
-    /* Clamp to valid range */
-    if (*fl < 0) {
+    /* Clamp to valid range - bounds rarely hit */
+    if (__builtin_expect(*fl < 0, 0)) {
       *fl = 0;
       *sl = 0;
-    } else if (*fl >= TLSF_FLI_MAX) {
+    } else if (__builtin_expect(*fl >= TLSF_FLI_MAX, 0)) {
       *fl = TLSF_FLI_MAX - 1;
       *sl = TLSF_SLI_COUNT - 1;
     }
@@ -173,10 +175,19 @@ static inline void block_set_prev_used(tlsf_block_t* block) { block->size &= ~TL
 /* TLSF Block Navigation */
 
 /*
- * Get next physical block
- * Advances point by block header size plus blocks's data size
+ * Get next physical block (fast path - no bounds checking)
+ * Advances pointer by block header size plus block's data size
+ * Used in hot paths where bounds are already validated
  */
 static inline tlsf_block_t* block_next(tlsf_block_t* block) { 
+  return (tlsf_block_t*)((char*)block + sizeof(tlsf_block_t) + block_size(block)); 
+}
+
+/*
+ * Get next physical block with bounds checking
+ * Use this when you need safety checks for untrusted pointers
+ */
+static inline tlsf_block_t* block_next_safe(tlsf_block_t* block) { 
   tlsf_block_t* next = (tlsf_block_t*)((char*)block + sizeof(tlsf_block_t) + block_size(block)); 
 
   /* Boundary check - don't return invalid pointer */
@@ -220,7 +231,7 @@ static inline void block_mark_as_free(tlsf_block_t* block) {
   block_set_free(block);
 
   /* Update next block's prev_free flag */
-  tlsf_block_t* next = block_next(block);
+  tlsf_block_t* next = block_next_safe(block);
   if (next) { block_set_prev_free(next); }
 }
 
@@ -249,14 +260,12 @@ static inline void insert_free_block(tlsf_control_t* ctrl, tlsf_block_t* block) 
 }
 
 /*
- * Remove block from its segregated free list
- * O(1) operation - uses doubly-linbked list pointers
+ * Remove block from its segregated free list (with FL/SL already computed)
+ * O(1) operation - uses doubly-linked list pointers
  * Updates bitmaps when list becomes empty
+ * Use this when FL/SL are already known to avoid redundant mapping()
  */
-static inline void remove_free_block(tlsf_control_t* ctrl, tlsf_block_t* block) {
-  int fl, sl;
-  mapping(block_size(block), &fl, &sl);
-
+static inline void remove_free_block_direct(tlsf_control_t* ctrl, tlsf_block_t* block, int fl, int sl) {
   tlsf_block_t* prev = block->prev_free;
   tlsf_block_t* next = block->next_free;
 
@@ -284,8 +293,20 @@ static inline void remove_free_block(tlsf_control_t* ctrl, tlsf_block_t* block) 
 }
 
 /*
+ * Remove block from its segregated free list
+ * O(1) operation - uses doubly-linked list pointers
+ * Updates bitmaps when list becomes empty
+ */
+static inline void remove_free_block(tlsf_control_t* ctrl, tlsf_block_t* block) {
+  int fl, sl;
+  mapping(block_size(block), &fl, &sl);
+  remove_free_block_direct(ctrl, block, fl, sl);
+}
+
+/*
  * Search for suitable free block using TLSF two-level bitmap search
  * O(1) operation - uses bitmaps to find smallest sufficient block
+ * Also returns FL/SL indices to avoid redundant mapping() in caller
  * 
  * Strategy:
  * 1. Map requested size to FL/SL
@@ -293,7 +314,7 @@ static inline void remove_free_block(tlsf_control_t* ctrl, tlsf_block_t* block) 
  * 3. If not found, search next non-empty FL
  * 4. Return first block from found list (guaranteed to fit)
  */
-static inline tlsf_block_t* search_suitable_block(tlsf_control_t* ctrl, size_t size) {
+static inline tlsf_block_t* search_suitable_block(tlsf_control_t* ctrl, size_t size, int* out_fl, int* out_sl) {
   int fl, sl;
   mapping(size, &fl, &sl);
 
@@ -302,6 +323,8 @@ static inline tlsf_block_t* search_suitable_block(tlsf_control_t* ctrl, size_t s
 
   if (sl_found >= 0) {
     /* Found in same FL */
+    *out_fl = fl;
+    *out_sl = sl_found;
     return ctrl->blocks[fl][sl_found];
   }
 
@@ -321,6 +344,8 @@ static inline tlsf_block_t* search_suitable_block(tlsf_control_t* ctrl, size_t s
     return NULL;
   }
 
+  *out_fl = fl_found;
+  *out_sl = sl_found;
   return ctrl->blocks[fl_found][sl_found];
 }
 
@@ -367,7 +392,7 @@ static inline tlsf_block_t* split_block(tlsf_block_t* block, size_t size) {
   block_set_prev_used(remainder);
 
   /* Upadate next block's prev_phys pointer */
-  tlsf_block_t* next = block_next(remainder);
+  tlsf_block_t* next = block_next_safe(remainder);
   if (next) { 
     next->prev_phys = remainder; 
     /* Update next block's prev_phys pointer */
@@ -400,7 +425,7 @@ static inline tlsf_block_t* coalesce_prev(tlsf_control_t* ctrl, tlsf_block_t* bl
   block_set_size(prev, combined_size);
 
   /* Update next block's prev_phys to point to merged block */
-  tlsf_block_t* next = block_next(prev);
+  tlsf_block_t* next = block_next_safe(prev);
   if (next) { next->prev_phys = prev; }
 
   return prev;
@@ -413,7 +438,7 @@ static inline tlsf_block_t* coalesce_prev(tlsf_control_t* ctrl, tlsf_block_t* bl
  * Caler must insert returned block into free list
  */
 static inline tlsf_block_t* coalesce_next(tlsf_control_t* ctrl, tlsf_block_t* block) {
-  tlsf_block_t* next = block_next(block);
+  tlsf_block_t* next = block_next_safe(block);
 
   if (!next || !block_is_free(next)) { return block; }
 
@@ -428,7 +453,7 @@ static inline tlsf_block_t* coalesce_next(tlsf_control_t* ctrl, tlsf_block_t* bl
   block_set_size(block, combined_size);
 
   /* Update next-next block's prev_phys to point to merged block */
-  tlsf_block_t* next_next = block_next(block);
+  tlsf_block_t* next_next = block_next_safe(block);
   if(next_next) { next_next->prev_phys = block; }
 
   /* Update last_block if we absorbed it */
@@ -664,7 +689,8 @@ void* mm_malloc(size_t size) {
   if (size < TLSF_MIN_BLOCK_SIZE) { size = TLSF_MIN_BLOCK_SIZE; }
 
   /* Search for suitable block using TLSF bitmap search */
-  tlsf_block_t* block = search_suitable_block(tlsf_ctrl, size);
+  int fl, sl;
+  tlsf_block_t* block = search_suitable_block(tlsf_ctrl, size, &fl, &sl);
 
   /* If no block found, grow heap and create new free block */
   if (block == NULL) {
@@ -672,12 +698,12 @@ void* mm_malloc(size_t size) {
     if (grow_heap(needed) != 0) { return NULL; /* Heap growth failed */ }
     
     /* Try searching again after heap growth */
-    block = search_suitable_block(tlsf_ctrl, size);
+    block = search_suitable_block(tlsf_ctrl, size, &fl, &sl);
     if (block == NULL) { return NULL; /* Should not happen after successful growth */ } 
   }
 
-  /* Remove block from free list */
-  remove_free_block(tlsf_ctrl, block);
+  /* Remove block from free list using direct removal (FL/SL already known) */
+  remove_free_block_direct(tlsf_ctrl, block, fl, sl);
 
   /* Split block if it's significantly larger than needed */
   tlsf_block_t* remainder = split_block(block, size);
@@ -687,7 +713,7 @@ void* mm_malloc(size_t size) {
   block_set_used(block);
   
   /* Update next block's prev_free flag */
-  tlsf_block_t* next = block_next(block);
+  tlsf_block_t* next = block_next_safe(block);
   if (next) { block_set_prev_used(next); }
 
   /* Return user pointer (skip past block header) */
@@ -732,7 +758,7 @@ void mm_free(void* ptr) {
     block_set_free(block);
 
     /* Update next block's prev_free flag */
-    tlsf_block_t* next = block_next(block);
+    tlsf_block_t* next = block_next_safe(block);
     if (next && (char*)next < tlsf_ctrl->heap_end) { block_set_prev_free(next); }
 
     /* Coalesce with adjacent free blocks (immediate coalescing) */
@@ -908,7 +934,7 @@ void* mm_realloc(void* ptr, size_t size) {
   /* Phase 3.2: In-place grow for TLSF blocks */
   if (is_tlsf_block && aligned_size > old_size) {
     tlsf_block_t* block = user_to_block(ptr);
-    tlsf_block_t* next = block_next(block);
+    tlsf_block_t* next = block_next_safe(block);
 
     /* Check if next block exists, is free, and provides enough space */
     if (next && block_is_free(next)) {
@@ -925,7 +951,7 @@ void* mm_realloc(void* ptr, size_t size) {
         block_set_size(block, combined_size);
 
         /* Update physical linkage */
-        tlsf_block_t* next_next = block_next(block);
+        tlsf_block_t* next_next = block_next_safe(block);
         if (next_next) {
           next_next->prev_phys = block;
           block_set_prev_used(next_next);
