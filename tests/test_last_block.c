@@ -56,6 +56,7 @@ int main() {
 
   /* last_block should have no next physical block */
   tlsf_block_t* last = tlsf_ctrl->last_block;
+  (void)last;
   assert((char*)last + sizeof(tlsf_block_t) + (last->size & (~(size_t)3)) <= tlsf_ctrl->heap_end);
   printf("PASSED\n");
 

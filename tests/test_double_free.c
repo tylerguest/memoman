@@ -24,9 +24,11 @@ int main(void) {
   void* p1 = mm_malloc(64);
   assert(p1 != NULL);
   size_t free_before = get_free_space();
+  (void)free_before;
 
   mm_free(p1);
   size_t free_after_first = get_free_space();
+  (void)free_after_first;
   assert(free_after_first > free_before);  /* Space increased after free */
 
   mm_free(p1);  /* Double free - should be detected and ignored */
@@ -139,6 +141,7 @@ int main(void) {
     /* Verify the block is NOT marked as free */
     /* Attempting to "double-free" orig should work since it's actually reused/allocated */
     size_t before = get_free_space();
+    (void)before;
     mm_free(orig);  /* this is actually freeing 'reused' - valid */
     assert(get_free_space() > before);  /* Free space increased - block was freed */
   } else { mm_free(reused); }

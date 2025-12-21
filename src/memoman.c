@@ -6,7 +6,10 @@
 #include <unistd.h>
 #include <string.h>
 
-/* Configuration */
+/* ===================== */
+/* === Configuration === */
+/* ===================== */
+
 #define ALIGNMENT 16
 #define LARGE_ALLOC_THRESHOLD (1024 * 1024)
 
@@ -14,6 +17,10 @@
 #define INITIAL_HEAP_SIZE (1024 * 1024)
 #define MAX_HEAP_SIZE (1024 * 1024 * 1024)
 #define HEAP_GROWTH_FACTOR 2
+
+/* ======================== */
+/* === Global Variables === */
+/* ======================== */
 
 /* TLSF Control */
 tlsf_control_t* tlsf_ctrl = NULL;
@@ -26,18 +33,23 @@ char* heap = NULL;
 char* current = NULL;
 size_t heap_capacity = 0;
 
-/* Utilities */
+/* ========================= */
+/* === Utility Functions === */
+/* ========================= */
+
 static inline size_t align_size(size_t size) { return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1); }
 static inline void* header_to_user(block_header_t* header) { return (char*)header + sizeof(block_header_t); }
 static inline block_header_t* user_to_header(void* ptr) { return (block_header_t*)((char*)ptr - sizeof(block_header_t)); }
 
-/* TLSF Bit Manipulation Functions*/
+/* ======================================= */
+/* === TLSF Bit Manipulation Functions === */
+/* ======================================= */
 
 /* 
  * Find Last Set (FLS) - position of most significant bit
  * Uses GCC/Clang builtin. For other compilers, implement manual bit scan
  */
-static inline int fls_generic(size_t word) { return (sizeof(size_t) * 8) - 1- __builtin_clzl(word); }
+static inline int fls_generic(size_t word) { return (sizeof(size_t) * 8) - 1 - __builtin_clzl(word); }
 
 /*
  * Find First Set (FFS) - position of least significant bit
@@ -47,6 +59,10 @@ static inline int ffs_generic(uint32_t word) {
   int result = __builtin_ffs(word);
   return result ? result - 1 :  -1;
 }
+
+/* ============================== */
+/* === TLSF Mapping Functions === */
+/* ============================== */
 
 /*
  * Maps allocation size to first-level index (FLI)
@@ -91,7 +107,9 @@ static inline void mapping(size_t size, int* fl, int* sl) {
   }
 }
 
-/* TLSF Bitmap Operations */
+/* ============================== */
+/* === TLSF Bitmap Operations === */
+/* ============================== */
 
 /*
  * Set bit in first-level bitmap when list becomes non-empty
@@ -99,7 +117,7 @@ static inline void mapping(size_t size, int* fl, int* sl) {
 static inline void set_fl_bit(tlsf_control_t* ctrl, int fl) { ctrl->fl_bitmap |= (1U << fl); }
 
 /*
- * Set bit in second-level bitmap when list becomes empty
+ * Set bit in second-level bitmap when list becomes non-empty
  */
 static inline void set_sl_bit(tlsf_control_t* ctrl, int fl, int sl) { ctrl->sl_bitmap[fl] |= (1U << sl); }
 
@@ -134,7 +152,9 @@ static inline int find_suitable_sl(tlsf_control_t* ctrl, int fl, int sl) {
   return mask ? ffs_generic(mask) : -1;
 }
 
-/* TLSF Block Utility Functions */
+/* ==================================== */
+/* === TLSF Block Utility Functions === */
+/* ==================================== */
 
 /*
  * Extract block size without flags
@@ -172,7 +192,9 @@ static inline void block_set_prev_free(tlsf_block_t* block) { block->size |= TLS
  */
 static inline void block_set_prev_used(tlsf_block_t* block) { block->size &= ~TLSF_PREV_FREE; }
 
-/* TLSF Block Navigation */
+/* ============================= */
+/* === TLSF Block Navigation === */
+/* ============================= */
 
 /*
  * Get next physical block (fast path - no bounds checking)
@@ -212,7 +234,9 @@ static inline void* block_to_user(tlsf_block_t* block) { return (char*)block + s
  */
 static inline void* user_to_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - sizeof(tlsf_block_t)); }
 
-/* TLSF Block Metadata Helpers */
+/* ============================ */
+/* === TLSF Block Metadata  === */
+/* ============================ */
 
 /*
  * Set block size while preserving flags
@@ -235,7 +259,9 @@ static inline void block_mark_as_free(tlsf_block_t* block) {
   if (next) { block_set_prev_free(next); }
 }
 
-/* TLSF Free List Management */
+/* ================================= */
+/* === TLSF Free List Management === */
+/* ================================= */
 
 /*
  * Insert block into appropriate segregated free list
@@ -349,7 +375,9 @@ static inline tlsf_block_t* search_suitable_block(tlsf_control_t* ctrl, size_t s
   return ctrl->blocks[fl_found][sl_found];
 }
 
-/* TLSF Block Splititng & Coalescing */
+/* ============================ */
+/* === TLSF Block Splititng === */
+/* ============================ */
 
 /*
  * Split block if remainder is usable
@@ -404,6 +432,10 @@ static inline tlsf_block_t* split_block(tlsf_block_t* block, size_t size) {
   
   return remainder;
 }
+
+/* ============================= */
+/* === TLSF Block Coalescing === */
+/* ============================= */
 
 /*
  * Coalesce with previous physical block
@@ -483,7 +515,9 @@ static inline tlsf_block_t* coalesce(tlsf_control_t* ctrl, tlsf_block_t* block) 
   return block;
 }
 
-/* TLSF Wilderness Management */
+/* ================================== */
+/* === TLSF Wilderness Management === */
+/* ================================== */
 
 /*
  * Create free block from uncommitted/newly committed heap space
@@ -545,7 +579,9 @@ static void create_free_block(tlsf_control_t* ctrl, void* start, size_t size) {
   insert_free_block(ctrl, block);
 }
 
-/* Allocation */
+/* ================================ */
+/* === Initialization & Cleanup === */
+/* ================================ */
 
 /*
  * Reserve-then-commit strategy: reserves 1GB address space but only commits
@@ -617,6 +653,10 @@ void mm_destroy(void) {
   tlsf_ctrl = NULL;
 }
 
+/* ======================= */
+/* === Heap Management === */
+/* ======================= */
+
 /*
  * Expands heap capacity by doubling (or more if needed).
  * Uses mprotect on pre-reserved address space to avoid heap relocation.
@@ -650,6 +690,10 @@ static int grow_heap(size_t min_additional) {
 
   return 0;
 }
+
+/* ================================= */
+/* === Core Allocation Functions === */
+/* ================================= */
 
 /*
  * TLSF allocation with dynamic heap growth
@@ -798,64 +842,6 @@ void mm_free(void* ptr) {
 #endif
 }
 
-/* Management */
-size_t get_free_space(void) { 
-  if (!tlsf_ctrl) return heap_capacity;
-  
-  size_t total_free = 0;
-
-  for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
-    if (!((tlsf_ctrl->fl_bitmap & (1U << fl)))) continue;
-
-    for (int sl = 0; sl < TLSF_SLI_COUNT; sl++) {
-      tlsf_block_t* block = tlsf_ctrl->blocks[fl][sl];
-
-      while (block != NULL) {
-        size_t size = block->size & TLSF_SIZE_MASK;
-        total_free += size + sizeof(tlsf_block_t); /* Include header overhead */
-        block = block->next_free;
-      }
-    }
-  }
-
-  return total_free; 
-}
-
-size_t mm_get_usable_size(void* ptr) {
-  /* NULL pointer has no size */
-  if (ptr == NULL) return 0;
-
-  /* Check if TLSF is initialized */
-  if (tlsf_ctrl == NULL) return 0;
-
-  /* Check if pointer is within heap bounds (TLSF block) */
-  if ((char*)ptr >= tlsf_ctrl->heap_start && (char*)ptr < tlsf_ctrl->heap_end) {
-    tlsf_block_t* block = (tlsf_block_t*)user_to_block(ptr);
-
-    /* Validate block header is within bounds */
-    if ((char*)block < tlsf_ctrl->heap_start) return 0;
-
-    /* Return the block's data size */
-    return block_size(block);
-  }
-
-  /* Check if it's a large block (mmap'd) */
-  large_block_t* potential_large = (large_block_t*)((char*)ptr - sizeof(large_block_t));
-
-  /* Walk large_blocks list to verify */
-  large_block_t* lb = large_blocks;
-  while(lb) {
-    if (lb == potential_large && lb->magic == LARGE_BLOCK_MAGIC) {
-      /* Return usable size (total - header) */
-      return lb->size - sizeof(large_block_t);
-    }
-    lb = lb->next;
-  }
-
-  /* Invalid pointer */
-  return 0;
-}
-
 void* mm_calloc(size_t nmemb, size_t size) {
   /* check for multiplication overflow */
   if (nmemb != 0 && size > SIZE_MAX / nmemb) {
@@ -994,6 +980,45 @@ void* mm_realloc(void* ptr, size_t size) {
   return new_ptr;
 }
 
+/* ================== */
+/* === Management === */
+/* ================== */
+
+size_t mm_get_usable_size(void* ptr) {
+  /* NULL pointer has no size */
+  if (ptr == NULL) return 0;
+
+  /* Check if TLSF is initialized */
+  if (tlsf_ctrl == NULL) return 0;
+
+  /* Check if pointer is within heap bounds (TLSF block) */
+  if ((char*)ptr >= tlsf_ctrl->heap_start && (char*)ptr < tlsf_ctrl->heap_end) {
+    tlsf_block_t* block = (tlsf_block_t*)user_to_block(ptr);
+
+    /* Validate block header is within bounds */
+    if ((char*)block < tlsf_ctrl->heap_start) return 0;
+
+    /* Return the block's data size */
+    return block_size(block);
+  }
+
+  /* Check if it's a large block (mmap'd) */
+  large_block_t* potential_large = (large_block_t*)((char*)ptr - sizeof(large_block_t));
+
+  /* Walk large_blocks list to verify */
+  large_block_t* lb = large_blocks;
+  while(lb) {
+    if (lb == potential_large && lb->magic == LARGE_BLOCK_MAGIC) {
+      /* Return usable size (total - header) */
+      return lb->size - sizeof(large_block_t);
+    }
+    lb = lb->next;
+  }
+
+  /* Invalid pointer */
+  return 0;
+}
+
 size_t get_total_allocated(void) { 
   if (!tlsf_ctrl) return 0;
   
@@ -1002,6 +1027,28 @@ size_t get_total_allocated(void) {
 
   if (free_space > usable_heap) return 0;
   return usable_heap - free_space;
+}
+
+size_t get_free_space(void) { 
+  if (!tlsf_ctrl) return heap_capacity;
+  
+  size_t total_free = 0;
+
+  for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
+    if (!((tlsf_ctrl->fl_bitmap & (1U << fl)))) continue;
+
+    for (int sl = 0; sl < TLSF_SLI_COUNT; sl++) {
+      tlsf_block_t* block = tlsf_ctrl->blocks[fl][sl];
+
+      while (block != NULL) {
+        size_t size = block->size & TLSF_SIZE_MASK;
+        total_free += size + sizeof(tlsf_block_t); /* Include header overhead */
+        block = block->next_free;
+      }
+    }
+  }
+
+  return total_free; 
 }
 
 void reset_allocator(void) {
