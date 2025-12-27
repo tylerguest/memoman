@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <string.h>
 #include <assert.h>
+#include <stdint.h>
+#include <limits.h>
 
 /* ===================== */
 /* === Configuration === */
@@ -248,6 +250,15 @@ static void create_free_block(mm_allocator_t* ctrl, void* start, size_t size) {
 /* === Public Instance API === */
 /* =========================== */
 
+static large_block_t* find_large_block(mm_allocator_t* ctrl, void* ptr) {
+  large_block_t* lb = ctrl->large_blocks;
+  while (lb) {
+    if ((char*)lb + sizeof(large_block_t) == (char*)ptr) return lb;
+    lb = lb->next;
+  }
+  return NULL;
+}
+
 mm_allocator_t* mm_create(void* mem, size_t bytes) {
   if (bytes < sizeof(mm_allocator_t) + TLSF_MIN_BLOCK_SIZE) return NULL;
 
@@ -317,8 +328,8 @@ void mm_free_inst(mm_allocator_t* ctrl, void* ptr) {
   if (!ptr || !ctrl) return;
 
   if ((char*)ptr < ctrl->heap_start || (char*)ptr >= ctrl->heap_end) {
-    large_block_t* lb = (large_block_t*)((char*)ptr - sizeof(large_block_t));
-    if (lb->magic == LARGE_BLOCK_MAGIC) {
+    large_block_t* lb = find_large_block(ctrl, ptr);
+    if (lb) {
       if (lb->prev) lb->prev->next = lb->next;
       else ctrl->large_blocks = lb->next;
       if (lb->next) lb->next->prev = lb->prev;
@@ -343,8 +354,8 @@ size_t mm_get_usable_size(mm_allocator_t* allocator, void* ptr) {
   if (!ptr || !allocator) return 0;
 
   if ((char*)ptr < allocator->heap_start || (char*)ptr >= allocator->heap_end) {
-    large_block_t* lb = (large_block_t*)((char*)ptr - sizeof(large_block_t));
-    if (lb->magic == LARGE_BLOCK_MAGIC) { return lb->size - sizeof(large_block_t); }
+    large_block_t* lb = find_large_block(allocator, ptr);
+    if (lb) return lb->size - sizeof(large_block_t);
     return 0;
   }
   tlsf_block_t* block = user_to_block(ptr);
@@ -469,6 +480,7 @@ void mm_destroy(void) {
 }
 
 void* mm_calloc(size_t nmemb, size_t size) {
+  if (nmemb != 0 && size > SIZE_MAX / nmemb) return NULL;
   size_t total = nmemb * size;
   void* p = mm_malloc(total);
   if (p) memset(p, 0, total);
@@ -478,11 +490,67 @@ void* mm_calloc(size_t nmemb, size_t size) {
 void* mm_realloc(void*ptr, size_t size) {
   if (!ptr) return mm_malloc(size);
   if (size == 0) { mm_free(ptr); return NULL; }
+  
+  if (!sys_allocator) return NULL;
+
+  /* Handle Main Heap Blocks */
+  if ((char*)ptr >= sys_allocator->heap_start && (char*)ptr < sys_allocator->heap_end) {
+    if ((uintptr_t)ptr % ALIGNMENT != 0) return NULL;
+
+    tlsf_block_t* block = user_to_block(ptr);
+    size_t current_size = block_size(block);
+    size_t aligned_size = align_size(size);
+    if (aligned_size < TLSF_MIN_BLOCK_SIZE) aligned_size = TLSF_MIN_BLOCK_SIZE;
+
+    /* Case 1: Shrink or Same Size */
+    if (aligned_size <= current_size) {
+      tlsf_block_t* remainder = split_block(sys_allocator, block, aligned_size);
+      if (remainder) insert_free_block(sys_allocator, remainder);
+      return ptr;
+    }
+
+    /* Case 2: Grow (Try to coalesce with next block) */
+    tlsf_block_t* next = block_next_safe(sys_allocator, block);
+    if (next && block_is_free(next)) {
+      size_t next_size = block_size(next);
+      size_t combined = current_size + sizeof(tlsf_block_t) + next_size;
+      
+      if (combined >= aligned_size) {
+        remove_free_block(sys_allocator, next);
+        block_set_size(block, combined);
+        
+        tlsf_block_t* next_next = block_next_safe(sys_allocator, block);
+        if (next_next) {
+          next_next->prev_phys = block;
+          block_set_prev_used(next_next);
+        } else {
+          sys_allocator->last_block = block;
+        }
+
+        tlsf_block_t* remainder = split_block(sys_allocator, block, aligned_size);
+        if (remainder) insert_free_block(sys_allocator, remainder);
+        return ptr;
+      }
+    }
+  } 
+  /* Handle Large Blocks */
+  else {
+    large_block_t* lb = find_large_block(sys_allocator, ptr);
+    if (lb) {
+      size_t current_size = lb->size - sizeof(large_block_t);
+      if (size <= current_size) return ptr; /* Shrink in place (waste space but valid) */
+      /* Fallthrough to malloc/copy/free for grow */
+    } else {
+      return NULL; /* Invalid pointer */
+    }
+  }
+
+  /* Fallback: Allocate new, copy, free old */
   void* new_ptr = mm_malloc(size);
-  if (!new_ptr) return NULL;
-  tlsf_block_t* block = user_to_block(ptr);
-  size_t old_size = block_size(block);
-  memcpy(new_ptr, ptr, (old_size < size) ? old_size : size);
-  mm_free(ptr);
+  if (new_ptr) {
+    size_t old_usable = mm_malloc_usable_size(ptr);
+    memcpy(new_ptr, ptr, (old_usable < size) ? old_usable : size);
+    mm_free(ptr);
+  }
   return new_ptr;
 }
