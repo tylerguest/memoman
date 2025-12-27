@@ -1,12 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include "../src/memoman.h" /* Now standard include! */
 
-// CRITICAL FIX: Include the .c file directly to see 'static' functions.
-// Do NOT include memoman.h
-#include "../src/memoman.c"
-
-// ANSI Color codes for readable output
+// ANSI Color codes
 #define GREEN "\033[0;32m"
 #define RED "\033[0;31m"
 #define RESET "\033[0m"
@@ -14,12 +11,10 @@
 int g_tests_passed = 0;
 int g_tests_failed = 0;
 
-// Note: No 'extern' declarations needed anymore because 
-// we literally pasted the code above via #include.
-
 void assert_mapping(size_t size, int expected_fl, int expected_sl, const char* desc) {
     int fl, sl;
-    mapping(size, &fl, &sl);
+    // Call the wrapper exposed in memoman.h
+    mm_get_mapping_indices(size, &fl, &sl);
     
     if (fl == expected_fl && sl == expected_sl) {
         printf(GREEN "[PASS]" RESET " Size %-8zu -> FL: %2d, SL: %2d (%s)\n", size, fl, sl, desc);
@@ -30,6 +25,17 @@ void assert_mapping(size_t size, int expected_fl, int expected_sl, const char* d
         printf("       Actual:   FL=%d, SL=%d\n", fl, sl);
         g_tests_failed++;
     }
+}
+
+// NOTE: fls_generic logic was: fl = fls(size) - TLSF_FLI_OFFSET
+// We duplicate simple math here for the test expectation
+int get_expected_fl(size_t size) {
+    int fl = 0;
+    if (size >= TLSF_MIN_BLOCK_SIZE) {
+        fl = (sizeof(size_t) * 8) - 1 - __builtin_clzl(size);
+        fl -= TLSF_FLI_OFFSET;
+    }
+    return fl;
 }
 
 void test_clamping() {
@@ -44,7 +50,7 @@ void test_powers_of_two() {
     size_t start_size = TLSF_MIN_BLOCK_SIZE * 2; 
     
     for (size_t s = start_size; s <= (1024*1024); s *= 2) {
-        int expected_fl = mapping_fli(s) - TLSF_FLI_OFFSET;
+        int expected_fl = get_expected_fl(s);
         assert_mapping(s, expected_fl, 0, "Power of 2");
     }
 }
@@ -52,7 +58,7 @@ void test_powers_of_two() {
 void test_sl_ranges() {
     printf("\n--- Test Case 3: Second Level Granularity ---\n");
     size_t base = 512;
-    int base_fl = mapping_fli(base) - TLSF_FLI_OFFSET;
+    int base_fl = get_expected_fl(base);
     size_t step = base / TLSF_SLI_COUNT;
     
     printf("Checking FL range starting at %zu with step size %zu...\n", base, step);
@@ -68,7 +74,7 @@ void test_sl_ranges() {
 void test_transition() {
     printf("\n--- Test Case 4: FL Transitions ---\n");
     size_t power_of_two = 1024;
-    int expected_fl_high = mapping_fli(power_of_two) - TLSF_FLI_OFFSET;
+    int expected_fl_high = get_expected_fl(power_of_two);
     assert_mapping(power_of_two, expected_fl_high, 0, "Power of 2 (1024)");
     assert_mapping(power_of_two - 1, expected_fl_high - 1, TLSF_SLI_COUNT - 1, "One byte less (1023)");
 }

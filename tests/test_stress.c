@@ -10,14 +10,14 @@ int main() {
       printf("Allocated ptr[%d]\n", i);
   }  
   
-  print_free_list();  
+  mm_print_free_list();  
   
   for (int i = 1; i < 10; i += 2) {
       mm_free(ptrs[i]);
       printf("Freed ptr[%d]\n", i);
   }  
   
-  print_free_list();  
+  mm_print_free_list();  
   
   return 0;
 }

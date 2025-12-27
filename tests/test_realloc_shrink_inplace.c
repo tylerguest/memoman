@@ -56,9 +56,9 @@ static int shrink_large_to_small_same_pointer(void) {
 }
 
 static int shrink_creates_free_space(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
-  size_t free_before = get_free_space();
+  size_t free_before = mm_get_free_space();
 
   /* Allocate large block */
   void* ptr = mm_malloc(4096);
@@ -69,7 +69,7 @@ static int shrink_creates_free_space(void) {
   ASSERT_NOT_NULL(new_ptr);
   ASSERT_EQ(new_ptr, ptr);
 
-  size_t free_after = get_free_space();
+  size_t free_after = mm_get_free_space();
 
   /* Should have more free space now */
   ASSERT_GT(free_after, free_before - 4096);
@@ -79,7 +79,7 @@ static int shrink_creates_free_space(void) {
 }
 
 static int shrink_freed_space_reusable(void) {
-  reset_allocator();
+  mm_reset_allocator();
 
   /* Allocate and shrink */
   void* ptr1 = mm_malloc(4096);

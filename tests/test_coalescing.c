@@ -27,7 +27,10 @@ int is_aligned(void* ptr) { return ((size_t)ptr % 8) == 0; }
 
 void test_basic_coalesce_right() {
   printf("\n--- Test: Coalesce Right (Merge with Next) ---\n");
-  reset_allocator();  
+  
+  /* FIX: Standard API reset */
+  mm_destroy();
+  mm_init();  
   
   // 1. Alloc A and B
   void* a = mm_malloc(64);
@@ -43,9 +46,7 @@ void test_basic_coalesce_right() {
   mm_free(a);  
   
   // 4. Request a size equal to A+B combined (plus headers)
-  
-  // A (64) + B (64) + Header(B) ~ 80 bytes available?
-  // Let's ask for 100 bytes. If they merged, we should get pointer A back.
+  // If they merged, we should get pointer A back.
   void* c = mm_malloc(100);  
   print_result(c == a, "Merged block returned original address (Left Merge)");
   
@@ -55,7 +56,10 @@ void test_basic_coalesce_right() {
 
 void test_basic_coalesce_left() {
   printf("\n--- Test: Coalesce Left (Merge with Prev) ---\n");
-  reset_allocator();  
+  
+  /* FIX: Standard API reset */
+  mm_destroy();
+  mm_init();  
   
   void* a = mm_malloc(64);
   void* b = mm_malloc(64);
@@ -78,7 +82,10 @@ void test_basic_coalesce_left() {
 
 void test_sandwich_coalesce() {
   printf("\n--- Test: The Sandwich (Merge Left AND Right) ---\n");
-  reset_allocator();  
+  
+  /* FIX: Standard API reset */
+  mm_destroy();
+  mm_init();  
   
   // Setup: [ A ] [ B ] [ C ] [ Guard ]
   void* a = mm_malloc(64);
@@ -95,15 +102,10 @@ void test_sandwich_coalesce() {
   // Heap state: [ Free ] [ Used B ] [ Free ] [ Guard ]  
   
   // 3. Free B (Should merge with A and C instantly)
-  
   mm_free(b);  
   
   // 4. Verification
-  
-  // If they merged, we now have a hole of size:
-  // 64+H + 64+H + 64+H approx 200+ bytes.
-  // If we request 150 bytes, we MUST get 'a' back.
-  // If we get NULL or a different pointer, fragmentation happened.
+  // If they merged, we MUST get 'a' back.
   void* d = mm_malloc(150);  
   print_result(d == a, "Middle block merged with both neighbors");
   
@@ -113,7 +115,10 @@ void test_sandwich_coalesce() {
 
 void test_fragmentation_survival() {
   printf("\n--- Test: Fragmentation Survival ---\n");
-  reset_allocator();
+  
+  /* FIX: Standard API reset */
+  mm_destroy();
+  mm_init();
     
   // Alloc 100 blocks
   void* ptrs[100];
@@ -130,8 +135,6 @@ void test_fragmentation_survival() {
   for(int i=1; i<100; i+=2) mm_free(ptrs[i]);
     
   // Try to allocate the ENTIRE sum of those blocks.
-  // If fragmentation remains, this will fail (return NULL).
-  // Total approx: 100 * (64 + header)
   size_t total_size = 100 * 64; 
   void* huge = mm_malloc(total_size);
 
@@ -143,6 +146,7 @@ void test_fragmentation_survival() {
 int main() {
   printf("=== TLSF Coalescing Test ===\n");
   
+  /* Initial Init */
   if (mm_init() != 0) {
       printf("Failed to init allocator\n");
       return 1;
@@ -157,5 +161,7 @@ int main() {
   printf("Passed: %d\n", g_passed);
   printf("Failed: %d\n", g_failed);  
   
+  mm_destroy();
+
   return g_failed > 0 ? 1 : 0;
 }

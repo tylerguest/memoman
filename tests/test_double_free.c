@@ -4,7 +4,7 @@
 #include <string.h>
 
 /* Access internal TLSF control */
-extern tlsf_control_t* tlsf_ctrl;
+extern mm_allocator_t* sys_allocator;
 
 int main(void) {
   printf("=== Double-Free Detection Tests ===\n");
@@ -13,7 +13,7 @@ int main(void) {
   void* init = mm_malloc(1);
   assert(init != NULL);
   mm_free(init);
-  reset_allocator();
+  mm_reset_allocator();
 
   /* Re-init after reset */
   init = mm_malloc(1);
@@ -23,16 +23,16 @@ int main(void) {
   printf("  Test 1: Simple double-free... ");
   void* p1 = mm_malloc(64);
   assert(p1 != NULL);
-  size_t free_before = get_free_space();
+  size_t free_before = mm_get_free_space();
   (void)free_before;
 
   mm_free(p1);
-  size_t free_after_first = get_free_space();
+  size_t free_after_first = mm_get_free_space();
   (void)free_after_first;
   assert(free_after_first > free_before);  /* Space increased after free */
 
   mm_free(p1);  /* Double free - should be detected and ignored */
-  assert(get_free_space() == free_after_first);  /* No change - double free ignored */
+  assert(mm_get_free_space() == free_after_first);  /* No change - double free ignored */
   printf("PASSED\n");
 
   /* Test 2: Triple free */
@@ -82,7 +82,7 @@ int main(void) {
 
   /* Test 5: Verify heap integrity after double-free attempts */
   printf("  Test 5: Heap integrity after double-frees... ");
-  reset_allocator();
+  mm_reset_allocator();
   init = mm_malloc(1);
   mm_free(init);
 
@@ -140,10 +140,10 @@ int main(void) {
   if (reused == orig) {
     /* Verify the block is NOT marked as free */
     /* Attempting to "double-free" orig should work since it's actually reused/allocated */
-    size_t before = get_free_space();
+    size_t before = mm_get_free_space();
     (void)before;
     mm_free(orig);  /* this is actually freeing 'reused' - valid */
-    assert(get_free_space() > before);  /* Free space increased - block was freed */
+    assert(mm_get_free_space() > before);  /* Free space increased - block was freed */
   } else { mm_free(reused); }
   printf("PASSED\n");
 

@@ -5,7 +5,7 @@
 /* === In-Place Grow Tests === */
 
 static int grow_returns_same_pointer(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   /* Allocate two blocks */
   void* ptr1 = mm_malloc(256);
@@ -28,7 +28,7 @@ static int grow_returns_same_pointer(void) {
 }
 
 static int grow_with_data_preservation(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   void* ptr1 = mm_malloc(128);
   void* ptr2 = mm_malloc(512);
@@ -60,7 +60,7 @@ static int grow_with_data_preservation(void) {
 }
 
 static int grow_exact_fit(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   /* Allocate blocks that will create exact fit scenario */
   void* ptr1 = mm_malloc(100);
@@ -74,7 +74,7 @@ static int grow_exact_fit(void) {
   mm_free(ptr2);
 
   /* Grow to exactly use the freed space */
-  size_t usable1 = mm_get_usable_size(ptr1);
+  size_t usable1 = mm_malloc_usable_size(ptr1);
   void* new_ptr = mm_realloc(ptr1, usable1 + 100);
   ASSERT_NOT_NULL(new_ptr);
   ASSERT_EQ(new_ptr, original);
@@ -84,7 +84,7 @@ static int grow_exact_fit(void) {
 }
 
 static int grow_multiple_times(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   void* ptr1 = mm_malloc(64);
   void* ptr2 = mm_malloc(512);
@@ -114,7 +114,7 @@ static int grow_multiple_times(void) {
 }
 
 static int grow_splits_excess(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   /* Allocate small block followed by large block */
   void* ptr1 = mm_malloc(128);
@@ -122,7 +122,7 @@ static int grow_splits_excess(void) {
   ASSERT_NOT_NULL(ptr1);
   ASSERT_NOT_NULL(ptr2);
 
-  size_t free_before = get_free_space();
+  size_t free_before = mm_get_free_space();
 
   /* Free large block */
   mm_free(ptr2);
@@ -132,7 +132,7 @@ static int grow_splits_excess(void) {
   void* new_ptr = mm_realloc(ptr1, 256);
   ASSERT_EQ(new_ptr, original);
 
-  size_t free_after = get_free_space();
+  size_t free_after = mm_get_free_space();
 
   /* Should still have significant free space from split */
   ASSERT_GT(free_after, free_before - 2048);
@@ -144,7 +144,7 @@ static int grow_splits_excess(void) {
 /* === Cannot Grow In-Place === */
 
 static int grow_no_next_block(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   /* Allocate single block at end */
   void* ptr = mm_malloc(256);
@@ -162,7 +162,7 @@ static int grow_no_next_block(void) {
 }
 
 static int grow_next_block_used(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   void* ptr1 = mm_malloc(256);
   void* ptr2 = mm_malloc(256);
@@ -184,7 +184,7 @@ static int grow_next_block_used(void) {
 }
 
 static int grow_next_block_too_small(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   void* ptr1 = mm_malloc(256);
   void* ptr2 = mm_malloc(64);
@@ -213,7 +213,7 @@ static int grow_next_block_too_small(void) {
 /* === Edge Cases === */
 
 static int grow_coalesces_multiple_free_blocks(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   void* ptr1 = mm_malloc(128);
   void* ptr2 = mm_malloc(256);
@@ -256,7 +256,7 @@ static int grow_same_size_returns_same_pointer(void) {
 /* === Shrink vs Grow Behavior === */
 
 static int shrink_then_grow_same_pointer(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   void* ptr = mm_malloc(1024);
   ASSERT_NOT_NULL(ptr);
@@ -284,7 +284,7 @@ static int shrink_then_grow_same_pointer(void) {
 static int grow_double(size_t size) {
   if (size < 32 || size > 4096) return 1;  /* Reasonable range */
 
-  reset_allocator();
+  mm_reset_allocator();
   
   void* ptr1 = mm_malloc(size);
   void* ptr2 = mm_malloc(size * 3);  /* Ensure enough space for doubling */
@@ -306,7 +306,7 @@ static int grow_double(size_t size) {
 static int grow_small_increment(size_t size) {
   if (size < 64) return 1;
 
-  reset_allocator();
+  mm_reset_allocator();
   
   void* ptr1 = mm_malloc(size);
   void* ptr2 = mm_malloc(512);

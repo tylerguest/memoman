@@ -9,7 +9,7 @@ int main() {
   mm_free(init);
   
   printf("1. Initial state:\n");
-  print_heap_stats();  
+  mm_print_heap_stats();  
   printf("2. Allocating large chunks to fill heap:\n");  
   void* ptrs[12];  
   
@@ -20,7 +20,7 @@ int main() {
         printf("   Allocation %d FAILED (expected after ~10 allocations)\n", i + 1);
         break;
     } else { printf("   Allocation %d succeeded at %p\n", i + 1, ptrs[i]); }  
-    if ((i + 1) % 3 == 0) { print_heap_stats(); }
+    if ((i + 1) % 3 == 0) { mm_print_heap_stats(); }
   }  
 
   printf("\n3. Try one massive allocation:\n");
@@ -31,7 +31,7 @@ int main() {
   else { printf("   Unexpectedly succeeded! This shouldn't happen.\n"); }  
   
   printf("\n4. Final heap state:\n");
-  print_heap_stats();  
+  mm_print_heap_stats();  
   
   printf("=== Overflow Test Complete ===\n");
   

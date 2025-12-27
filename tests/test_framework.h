@@ -101,6 +101,6 @@ static inline const char* _format_size(size_t size, char* buf, size_t buflen) {
   return (_tests_failed == 0) ? 0 : 1
 
 /* Reset between tests if needed */
-#define TEST_RESET() reset_allocator()
+#define TEST_RESET() mm_reset_allocator()
 
 #endif  /* TEST_FRAMEWORK */

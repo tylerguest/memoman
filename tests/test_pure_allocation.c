@@ -16,7 +16,7 @@ int main() {
   
   printf("=== Pure Allocation Speed Test ===\n\n");
   
-  reset_allocator();
+  mm_reset_allocator();
   double start = get_time();
   for (int i = 0; i < NUM_ALLOCS; i++) { ptrs[i] = mm_malloc(80); }  // 19.53 KB matrix row
   for (int i = 0; i < NUM_ALLOCS; i++) { mm_free(ptrs[i]); }

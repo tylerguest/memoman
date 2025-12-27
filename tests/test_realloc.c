@@ -8,7 +8,7 @@ static int null_is_malloc(void) {
   void* ptr = mm_realloc(NULL, 100);
   ASSERT_NOT_NULL(ptr);
 
-  size_t usable = mm_get_usable_size(ptr);
+  size_t usable = mm_malloc_usable_size(ptr);
   ASSERT_GE(usable, 100);
 
   mm_free(ptr);
@@ -102,7 +102,7 @@ static int grow_small_to_medium(void) {
   void* new_ptr = mm_realloc(ptr, 1024);
   ASSERT_NOT_NULL(new_ptr);
 
-  size_t usable = mm_get_usable_size(new_ptr);
+  size_t usable = mm_malloc_usable_size(new_ptr);
   ASSERT_GE(usable, 1024);
 
   mm_free(new_ptr);
@@ -116,7 +116,7 @@ static int shrink_medium_to_small(void) {
   void* new_ptr = mm_realloc(ptr, 64);
   ASSERT_NOT_NULL(new_ptr);
 
-  size_t usable = mm_get_usable_size(new_ptr);
+  size_t usable = mm_malloc_usable_size(new_ptr);
   ASSERT_GE(usable, 64);
 
   mm_free(new_ptr);
@@ -131,7 +131,7 @@ static int grow_to_large_block(void) {
   void* new_ptr = mm_realloc(ptr, 2 * 1024 * 1024);
   ASSERT_NOT_NULL(new_ptr);
 
-  size_t usable = mm_get_usable_size(new_ptr);
+  size_t usable = mm_malloc_usable_size(new_ptr);
   ASSERT_GE(usable, 2 * 1024 * 1024);
 
   mm_free(new_ptr);
@@ -146,7 +146,7 @@ static int shrink_from_large_block(void) {
   void* new_ptr = mm_realloc(ptr, 100);
   ASSERT_NOT_NULL(new_ptr);
 
-  size_t usable = mm_get_usable_size(new_ptr);
+  size_t usable = mm_malloc_usable_size(new_ptr);
   ASSERT_GE(usable, 100);
 
   mm_free(new_ptr);
@@ -156,7 +156,7 @@ static int shrink_from_large_block(void) {
 /* === In-Place Operations (Task 3.3) === */
 
 static int inplace_shrink_same_pointer(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   void* ptr = mm_malloc(1024);
   ASSERT_NOT_NULL(ptr);
@@ -173,7 +173,7 @@ static int inplace_shrink_same_pointer(void) {
 }
 
 static int inplace_grow_same_pointer(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   /* Allocate two blocks, free second to create adjacent free space */
   void* ptr1 = mm_malloc(256);
@@ -209,7 +209,7 @@ static int inplace_same_size_same_pointer(void) {
 }
 
 static int inplace_shrink_preserves_data(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   char* ptr = mm_malloc(1024);
   ASSERT_NOT_NULL(ptr);
@@ -232,7 +232,7 @@ static int inplace_shrink_preserves_data(void) {
 }
 
 static int inplace_grow_preserves_data(void) {
-  reset_allocator();
+  mm_reset_allocator();
   
   /* Setup: allocate and free to create fragmentation */
   void* ptr1 = mm_malloc(256);
@@ -397,7 +397,7 @@ static int failure_leaves_original(void) {
   ASSERT_NULL(bad);
 
   /* Original pointer should still be valid */
-  ASSERT_EQ(mm_get_usable_size(ptr), mm_get_usable_size(ptr));
+  ASSERT_EQ(mm_malloc_usable_size(ptr), mm_malloc_usable_size(ptr));
 
   mm_free(ptr);
   return 1;
@@ -412,7 +412,7 @@ static int grow(size_t size) {
   void* new_ptr = mm_realloc(ptr, size * 2);
   ASSERT_NOT_NULL(new_ptr);
 
-  size_t usable = mm_get_usable_size(new_ptr);
+  size_t usable = mm_malloc_usable_size(new_ptr);
   ASSERT_GE(usable, size * 2);
 
   mm_free(new_ptr);
@@ -428,7 +428,7 @@ static int shrink(size_t size) {
   void* new_ptr = mm_realloc(ptr, size / 2);
   ASSERT_NOT_NULL(new_ptr);
 
-  size_t usable = mm_get_usable_size(new_ptr);
+  size_t usable = mm_malloc_usable_size(new_ptr);
   ASSERT_GE(usable, size / 2);
 
   mm_free(new_ptr);

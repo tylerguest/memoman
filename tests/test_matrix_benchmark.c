@@ -30,7 +30,7 @@ double get_time() {
 double test_memoman_linear(int num_allocs, size_t size) {
   void** ptrs = malloc(num_allocs * sizeof(void*));
   // Note: NOT resetting allocator inside loop to test sustainment
-  reset_allocator(); 
+  mm_reset_allocator(); 
   
   double start = get_time();
   
@@ -74,7 +74,7 @@ double test_malloc_linear(int num_allocs, size_t size) {
 // This is where TLSF should show stability vs malloc's fragmentation issues
 double test_memoman_random(int num_allocs, size_t size) {
   void** ptrs = malloc(num_allocs * sizeof(void*));
-  reset_allocator();
+  mm_reset_allocator();
   
   double start = get_time();
   

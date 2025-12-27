@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 /* Access internal TLSF control */
-extern tlsf_control_t* tlsf_ctrl;
+extern mm_allocator_t* sys_allocator;
 
 int main(void) {
   printf("=== Heap Bounds Validation Tests ===\n");
@@ -32,19 +32,19 @@ int main(void) {
 
   /* Test 4: Free pointer before heap start */
   printf("  Test 4: Free pointer before heap... ");
-  void* before_heap = (void*)(tlsf_ctrl->heap_start - 100);
+  void* before_heap = (void*)(sys_allocator->heap_start - 100);
   mm_free(before_heap);
   printf("PASSED\n");
 
   /* Test 5: Free pointer after heap end */
   printf("  Test 5: Free pointer after heap... ");
-  void* after_heap = (void*)(tlsf_ctrl->heap_end + 100);
+  void* after_heap = (void*)(sys_allocator->heap_end + 100);
   mm_free(after_heap);
   printf("PASSED\n");
 
   /* Test 6: Free pointer at exact heap_end (invalid - one past end) */
   printf("  Test 6: Free pointer at heap_end boundary... ");
-  mm_free((void*)tlsf_ctrl->heap_end);
+  mm_free((void*)sys_allocator->heap_end);
   printf("PASSED\n");
 
   /* Test 7: Double free handling */

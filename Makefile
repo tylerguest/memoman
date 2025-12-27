@@ -18,13 +18,13 @@ all: $(TESTS)
 # --- EXCEPTION RULE: White-Box Testing ---
 # 1. Matches ONLY test_mapping_unit
 # 2. Depends on memoman.c (so edits trigger rebuild) but does NOT link it (to avoid double definition)
-tests/bin/test_mapping_unit: tests/test_mapping_unit.c src/memoman.c src/mmdebug.c src/memoman.h
-	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/mmdebug.c tests/test_mapping_unit.c
+tests/bin/test_mapping_unit: tests/test_mapping_unit.c src/memoman.c src/memoman.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/memoman.c tests/test_mapping_unit.c
 
 # --- GENERIC RULE: Black-Box Testing ---
 # Matches all other tests and links memoman.c normally
-tests/bin/%: tests/%.c src/memoman.c src/mmdebug.c src/memoman.h
-	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/memoman.c src/mmdebug.c $<
+tests/bin/%: tests/%.c src/memoman.c src/memoman.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/memoman.c $<
 
 benchmark: clean
 	@mkdir -p tests/bin

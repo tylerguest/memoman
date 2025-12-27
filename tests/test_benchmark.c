@@ -4,7 +4,6 @@
 #include <time.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <time.h>
 
 #ifndef CLOCK_MONOTONIC
 #define CLOCK_MONOTONIC 1
@@ -32,11 +31,20 @@ int main() {
   for (int t = 0; t < trials; t++) {
     printf("Trial %d/%d\n", t + 1, trials);
     printf("  Testing memoman...\n");
-    reset_allocator();  
+    
+    /* FIX: Use API to reset. Destroy old instance, explicitly init new one. */
+    mm_destroy(); 
+    mm_init();    
+    
     double start = get_time();
     void* ptrs[100];
     int active_count = 0;
+    
+    /* Variable unused warning fix: removed total_allocated if not used, 
+       or keep it if you plan to print it. */
     size_t total_allocated = 0;  
+    (void)total_allocated; // Silence unused warning
+    
     for (int i = 0; i < iterations; i++) {
       size_t size = (i % 10 == 0) ? (100 + rand() % 1000000) : (100 + i % 400);  
       if (active_count < 100 || (i % 2 == 0)) {
@@ -57,6 +65,7 @@ int main() {
     for (int i = 0; i < active_count; i++) { mm_free(ptrs[i]); }  
     double end = get_time();
     memoman_times[t] = end - start;  
+    
     printf("  Testing glibc malloc...\n");
     start = get_time();  
     void* sys_ptrs[100];
@@ -80,6 +89,7 @@ int main() {
     end = get_time();
     glibc_times[t] = end - start;
   }  
+  
   double avg_memoman = 0, avg_glibc = 0;
   for (int t = 0; t < trials; t++) {
     avg_memoman += memoman_times[t];
@@ -87,6 +97,7 @@ int main() {
   }
   avg_memoman /= trials;
   avg_glibc /= trials;  
+  
   printf("\n=== AVERAGED RESULTS ===\n");
   printf("memoman:            %.6f seconds\n", avg_memoman);
   printf("glibc malloc:       %.6f seconds\n", avg_glibc);

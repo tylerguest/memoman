@@ -5,69 +5,34 @@
 #include <stdint.h>
 
 /* ========================== */
-/* === TLSF Configuration === */
+/* === Internal Constants === */
 /* ========================== */
 
-#define LARGE_BLOCK_MAGIC 0xDEADB10C       // For O(1) detection
-#define TLSF_MIN_BLOCK_SIZE 16             // Mininum allocatable block
-#define TLSF_FLI_MAX 30                    // log2(1GB) for max pool size
-#define TLSF_SLI 5                         // Second level index (2^5 = 32 bins)
-#define TLSF_SLI_COUNT (1 << TLSF_SLI)     // 32 second-level bins
-#define TLSF_FLI_OFFSET 4                  // Offset for minimum block size
+#define ALIGNMENT 16
+#define LARGE_ALLOC_THRESHOLD (1024 * 1024)
+#define INITIAL_HEAP_SIZE (1024 * 1024)
+#define TLSF_MIN_BLOCK_SIZE 16
+#define TLSF_FLI_MAX 30
+#define TLSF_SLI 5
+#define TLSF_SLI_COUNT (1 << TLSF_SLI)
+#define TLSF_FLI_OFFSET 4
 
-/* =================== */
-/* === Block Flags === */
-/* =================== */
-
-/* Block flag macros - stored in LSBs of size field */
-#define TLSF_BLOCK_FREE (1 << 0)           // Is block free?
-#define TLSF_PREV_FREE (1 << 1)            // Is previous physical block free?
-#define TLSF_SIZE_MASK (~(size_t)3)        // Mask to extract actual size
+#define TLSF_BLOCK_FREE (1 << 0)
+#define TLSF_PREV_FREE (1 << 1)
+#define TLSF_SIZE_MASK (~(size_t)3)
+#define LARGE_BLOCK_MAGIC 0xDEADB10C
 
 /* ======================= */
 /* === Data Structures === */
 /* ======================= */
 
-/*
- * TLSF block header with boundary tags and free list pointers
- * Size field uses LSBs for flags (free/prev)
- * Free blocks use next_free/prev_free for doubly-linked segregated lists
- * All blocks use prev_phys for backward physical traversal (boundary tag)
- */
 typedef struct tlsf_block {
   size_t size;
   struct tlsf_block* prev_phys;
-
-  /* Free blocks only - these overlap user data in allocated blocks */
   struct tlsf_block* next_free;
   struct tlsf_block* prev_free;
 } tlsf_block_t;
 
-/*
- * TLSF control structure - manages the two-level segeregated fit allocator
- * Placed at the start of the heap for cache locality
- */
-typedef struct {
-  /* Two-level segregated free lists: FLI x SLI matrix */
-  tlsf_block_t* blocks[TLSF_FLI_MAX][TLSF_SLI_COUNT];
-
-  /* Bitmaps for 0(1) search */
-  uint32_t fl_bitmap;                       // First-level: which FLI have free blocks
-  uint32_t sl_bitmap[TLSF_FLI_MAX];         // Second-level: which SLI per FLI
-
-  /* Heap bounds */
-  char* heap_start;                         // Start of allocatable heap
-  char* heap_end;                           // End of committed heap
-  size_t heap_capacity;                     // Total committed capacity
-
-  /* O(1) wilderness tracking */
-  tlsf_block_t* last_block;                 // Last physical block in heap
-} tlsf_control_t;
-
-/*
- * Large block structure - for allocations >= 1MB.
- * These bypass TLSF and use direct mmap.
- */
 typedef struct large_block {
   uint32_t magic;
   size_t size;
@@ -75,131 +40,51 @@ typedef struct large_block {
   struct large_block* prev;
 } large_block_t;
 
-/* Legacy type - to be removed */
-typedef tlsf_block_t block_header_t;
+typedef struct mm_allocator {
+  tlsf_block_t* blocks[TLSF_FLI_MAX][TLSF_SLI_COUNT];
+  uint32_t fl_bitmap;
+  uint32_t sl_bitmap[TLSF_FLI_MAX];
+  char* heap_start;
+  char* heap_end;
+  large_block_t* large_blocks;
+  tlsf_block_t* last_block;
+} mm_allocator_t;
 
-/* ================================ */
-/* === Initialization & Cleanup === */
-/* ================================ */
+/* ==================== */
+/* === Global State === */
+/* ==================== */
 
-/*
- * Initialize the allocator (optional - called automatically)
- * @return 0 on success, -1 on failure
- */
-int mm_init(void);
+/* Exposed for testing */
+extern mm_allocator_t* sys_allocator;
+extern char* sys_heap_base;
+extern size_t sys_heap_cap;
 
-/*
- * Cleanup and free all memory
- */
-void mm_destroy(void);
+/* ===================== */
+/* === Instsance API === */
+/* ===================== */
 
-/* ================================= */
-/* === Core Allocation Functions === */
-/* ================================= */
+mm_allocator_t* mm_create(void* mem, size_t bytes);
+void mm_destroy_instance(mm_allocator_t* allocator);
+void* mm_malloc_inst(mm_allocator_t* allocator, size_t size);
+void mm_free_inst(mm_allocator_t* allocator, void* ptr);
+size_t mm_get_usable_size(mm_allocator_t* allocator, void* ptr);
+void mm_get_mapping_indices(size_t size, int* fl, int* sl);
 
-/*
- * Allocate memory from the custom heap
- * 
- * @param size Number of bytes to allocate
- * @return Pointer to allocated memory, or NULL if allocation fails
- * 
- * Uses a segregated free list with size classes for fast allocation.
- * Falls back to first-fit search if no size class match is found.
- */
-void* mm_malloc(size_t size);
+/* ========================== */
+/* === Global Wrapper API === */
+/* ========================== */
 
-/*
- * Free previously allocated memory
- * 
- * @param ptr Pointer to memory to free (returned by mm_malloc)
- * 
- * Adds the block back to the appropriate free list.
- * Periodically coalesces adjacent free blocks to reduce fragmentation.
- */
-void mm_free(void* ptr);
-
-/*
- * Allocate zero-initialized memory
- * 
- * @param nmemb Number of elements
- * @param size Size of each element
- * @return Pointer to zero-initialized memory, or NULL on failur
- *
- * Checks for overflow in nmemb * size multiplication
- * Equivalent to malloc(nmemb * size) followed by memset to zero
- */
+int mm_init(void);                             // Initialize global default instance
+void mm_destroy(void);                         // Destroy global default instance
+void* mm_malloc(size_t size);                  // Allocate from global instance
+void mm_free(void* ptr);                       // Free from global instance
 void* mm_calloc(size_t nmemb, size_t size);
-
-/* 
- * Reallocate memory block to new size
- * 
- * @param ptr Pointer to existing allocation (or NULL)
- * @param size New size in bytes
- * @return Pointer to resized memory, or NULL on failure
- *
- * Behavior:
- * - ptr == NULL: equivalent to mm_malloc(size)
- * - size == 0: equivalent to mm_free(ptr), returns NULL
- * - Otherwise: allocates new block, copies data, frfees old block
- *
- * If allocation fails, original block is unchanged and NULL is returned
- */
 void* mm_realloc(void* ptr, size_t size);
-
-/* ============================ */
-/* === Utility & Statistics === */
-/* ============================ */
-
-/*
- * Get usable size of an allocated block
- *
- * @param ptr Pointer returned by mm_malloc
- * #@return Usable size in bytes, or 0 if ptr is invalid
- *
- * Returns the actual usable size which may be large than requested
- * due to alignement and mininum block size requirements.
- */
-size_t mm_get_usable_size(void* ptr);
-
-/*
- * Get total bytes allocated from heap
- * 
- * @return Total number of bytes currently in use (includes headers)
- */
-size_t get_total_allocated(void);
-
-/*
- * Get remaining free space in heap
- * 
- * @return Number of bytes available for allocation
- */
-size_t get_free_space(void);
-
-/*
- * Reset the allocator to initial state
- * 
- * Clears all allocations and free lists. Use for testing or cleanup.
- */
-void reset_allocator(void);
-
-/* ======================= */
-/* === Debug Functions === */
-/* ======================= */
-
-/*
- * Display current heap usage statistics
- * 
- * Shows total heap size, used space, free space, and usage percentage.
- */
-void print_heap_stats(void);
-                                                                                              
-/*
- * Display all blocks in the free list
- * 
- * Debugging utility that shows each free block's size and address.
- */
-void print_free_list(void);
-
-block_header_t* get_free_list(void);
+size_t mm_malloc_usable_size(void* ptr);
+void mm_print_heap_stats(void);
+size_t mm_get_free_space(void);
+size_t mm_get_total_allocated(void);
+void mm_print_free_list(void);
+void mm_reset_allocator(void);
 
 #endif 

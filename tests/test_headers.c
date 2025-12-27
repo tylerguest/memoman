@@ -9,7 +9,7 @@ int main() {
   char* ptr1 = (char*)mm_malloc(100);
   char* ptr2 = (char*)mm_malloc(200);
   char* ptr3 = (char*)mm_malloc(50);
-  print_heap_stats();
+  mm_print_heap_stats();
   
   printf("2. Use the memory:\n");
   strcpy(ptr1, "First block");
@@ -26,7 +26,7 @@ int main() {
   char* ptr4 = (char*)mm_malloc(75);
   strcpy(ptr4, "Fourth block");
   printf("   ptr4: %s\n", ptr4);
-  print_heap_stats();
+  mm_print_heap_stats();
   
   printf("=== Headers Test Complete ===\n");
   

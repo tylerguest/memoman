@@ -32,31 +32,31 @@ int main() {
 
   /* Test 2: Lazy initialization */
   printf("  Test 2: Lazy initialization... ");
-  reset_allocator();
-  extern char* heap;
-  heap = NULL;  // force re-init
+  mm_reset_allocator();
+  extern char* sys_heap_base;
+  sys_heap_base = NULL;  // force re-init
   assert(mm_malloc(100) != NULL);
-  assert(heap != NULL);
-  printf("\n    heap initialized at: %p\n", heap);
+  assert(sys_heap_base != NULL);
+  printf("\n    heap initialized at: %p\n", sys_heap_base);
   printf("    PASSED\n");
 
   /* Test 3: Pointer stability after heap growth */
   printf("  Test 3: Pointer stability after growth... ");
-  reset_allocator();
+  mm_reset_allocator();
   void* first = mm_malloc(100);
   assert(first != NULL);
   memset(first, 0x42, 100);
   
   printf("\n    initial pointer: %p\n", first);
-  extern size_t heap_capacity;
-  printf("    initial capacity: %zu bytes\n", heap_capacity);
+  extern size_t sys_heap_cap;
+  printf("    initial capacity: %zu bytes\n", sys_heap_cap);
 
   // allocate enough to trigger heap growth (1MB initial)
   for (int i = 0; i < 100; i++) {
     assert(mm_malloc(10000) != NULL);
   }
   
-  printf("    capacity after growth: %zu bytes\n", heap_capacity);
+  printf("    capacity after growth: %zu bytes\n", sys_heap_cap);
   printf("    pointer still at: %p (unchanged)\n", first);
 
   // verify original pointer still valid
@@ -66,7 +66,7 @@ int main() {
 
   /* Test 4: Large allocation bypass */
   printf("  Test 4: Large allocation bypass... ");
-  reset_allocator();
+  mm_reset_allocator();
   void* large1 = mm_malloc(3 * 1024 * 1024);  // 3MB
   void* large2 = mm_malloc(5 * 1024 * 1024);  // 5MB
   assert(large1 != NULL);
@@ -76,11 +76,12 @@ int main() {
   printf("    large2 (5MB) at: %p\n", large2);
 
   // verify they're separate from main heap
-  extern char* current;
-  size_t heap_used = current - heap;
+  size_t free_space = mm_get_free_space();
+  size_t total_heap = (size_t)(sys_allocator->heap_end - sys_allocator->heap_start);
+  size_t heap_used = total_heap - free_space;
   printf("    main heap used: %zu bytes (should be minimal)\n", heap_used);
   printf("    heap base: %p, large1: %p (diff: %td bytes)\n", 
-         heap, large1, (char*)large1 - heap);
+         sys_heap_base, large1, (char*)large1 - sys_heap_base);
   assert(heap_used < 1024 * 1024);  // main heap should be mostly empty
 
   mm_free(large1);
@@ -96,23 +97,23 @@ int main() {
 
   /* Test 6: Heap growth boundaries */
   printf("  Test 6: Heap growth at boundaries... ");
-  reset_allocator();
-  printf("\n    initial capacity: %zu bytes\n", heap_capacity);
+  mm_reset_allocator();
+  printf("\n    initial capacity: %zu bytes\n", sys_heap_cap);
   
   // allocate exactly to 1MB boundary
   size_t allocated = 0;
   while (allocated < 1024 * 1024 - 1024) {
     assert(mm_malloc(1000) != NULL);
-    allocated += 1000 + sizeof(block_header_t);
+    allocated += 1000 + sizeof(tlsf_block_t);
   }
   printf("    allocated up to boundary: %zu bytes\n", allocated);
 
   // this should trigger first mprotect growth
   assert(mm_malloc(10000) != NULL);
   
-  printf("    capacity after growth: %zu bytes\n", heap_capacity);
-  printf("    growth factor: %.1fx\n", (double)heap_capacity / (1024.0 * 1024.0));
-  assert(heap_capacity >= 2 * 1024 * 1024);  // should have doubled
+  printf("    capacity after growth: %zu bytes\n", sys_heap_cap);
+  printf("    growth factor: %.1fx\n", (double)sys_heap_cap / (1024.0 * 1024.0));
+  assert(sys_heap_cap >= 2 * 1024 * 1024);  // should have doubled
   printf("    PASSED\n");
 
   printf("\n✓ ALL mmap implementation tests passed!\n");

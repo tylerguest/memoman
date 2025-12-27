@@ -24,7 +24,10 @@ void print_result(int passed, const char* name) {
 
 void test_split_logic() {
     printf("\n--- Test: Block Splitting Logic ---\n");
-    reset_allocator();
+    
+    /* FIX: Replace mm_reset_allocator() with standard API calls */
+    mm_destroy();
+    mm_init();
 
     // 1. Allocate a large block (400 bytes)
     void* ptr1 = mm_malloc(400);
@@ -74,6 +77,8 @@ int main() {
     printf("\n=== Results ===\n");
     printf("Passed: %d\n", g_passed);
     printf("Failed: %d\n", g_failed);
+    
+    mm_destroy(); // Cleanup at end of main
 
     return g_failed > 0 ? 1 : 0;
 }

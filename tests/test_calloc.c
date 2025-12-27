@@ -1,5 +1,6 @@
 #include "test_framework.h"
 #include "../src/memoman.h"
+#include <limits.h>
 
 /* === Edge Cases === */
 
@@ -84,7 +85,8 @@ static int usable_size_correct(void) {
   void* ptr = mm_calloc(10, 16);  /* 160 bytes */
   ASSERT_NOT_NULL(ptr);
 
-  size_t usable = mm_get_usable_size(ptr);
+  /* FIX: Call global wrapper */
+  size_t usable = mm_malloc_usable_size(ptr);
   ASSERT_GE(usable, 160);
 
   mm_free(ptr);
@@ -97,7 +99,8 @@ static int calloc_basic(size_t size) {
   void* ptr = mm_calloc(1, size);
   ASSERT_NOT_NULL(ptr);
 
-  size_t usable = mm_get_usable_size(ptr);
+  /* FIX: Call global wrapper */
+  size_t usable = mm_malloc_usable_size(ptr);
   ASSERT_GE(usable, size);
 
   mm_free(ptr);
@@ -117,6 +120,9 @@ static int calloc_array(size_t size) {
 }
 
 int main(void) {
+  /* Explicit init for test environment consistency */
+  mm_init();
+
   TEST_SUITE_BEGIN("mm_calloc");
 
   TEST_SECTION("Edge Cases");
@@ -141,4 +147,6 @@ int main(void) {
 
   TEST_SUITE_END();
   TEST_MAIN_END();
+  
+  mm_destroy();
 }
