@@ -1,3 +1,4 @@
+#undef NDEBUG
 #include "../src/memoman.h"
 #include <stdio.h>
 #include <assert.h>
@@ -5,65 +6,46 @@
 /* Access internal TLSF control */
 extern mm_allocator_t* sys_allocator;
 
-int main() {
-  printf("Testing last_block tracking...\n");
-  
-  /* Initialize allocator first (lazy init via malloc) */
-  void* init_ptr = mm_malloc(1);
-  assert(init_ptr != NULL);
-  mm_free(init_ptr);
+/* Helper to access block fields since they are internal */
+static inline size_t get_block_size(tlsf_block_t* block) { return block->size & TLSF_SIZE_MASK; }
+static inline int is_block_used(tlsf_block_t* block) { return !(block->size & TLSF_BLOCK_FREE); }
 
-  /* Test 1: Initial state */
-  printf("  Test 1: Initial last_block... ");
+int main() {
+  printf("Testing Sentinels (Prologue/Epilogue)...\n");
+  
+  /* Initialize allocator */
   mm_reset_allocator();
   assert(sys_allocator != NULL);
-  assert(sys_allocator->last_block != NULL);
+
+  /* Test 1: Prologue exists */
+  printf("  Test 1: Prologue sentinel... ");
+  tlsf_block_t* prologue = (tlsf_block_t*)sys_allocator->heap_start;
+  assert(get_block_size(prologue) == 0);
+  assert(is_block_used(prologue));
   printf("PASSED\n");
 
-  /* Test 2: last_block after single allocation */
-  printf("  Test 2: After allocation... ");
-  void* p1 = mm_malloc(100);
-  assert(p1 != NULL);
-  assert(sys_allocator->last_block != NULL);
+  /* Test 2: Epilogue exists */
+  printf("  Test 2: Epilogue sentinel... ");
+  tlsf_block_t* epilogue = (tlsf_block_t*)(sys_allocator->heap_end - sizeof(tlsf_block_t));
+  assert(get_block_size(epilogue) == 0);
+  assert(is_block_used(epilogue));
   printf("PASSED\n");
 
-  /* Test 3: last_block after free (should still be valid) */
-  printf("  Test 3: After free... ");
-  mm_free(p1);
-  assert(sys_allocator->last_block != NULL);
-  printf("PASSED\n");
-
-  /* Test 4: last_block after heap growth */
-  printf("  Test 4: After heap growth... ");
-  mm_reset_allocator();
-  tlsf_block_t* initial_last = sys_allocator->last_block;
-
+  /* Test 3: Heap Growth maintains epilogue */
+  printf("  Test 3: Epilogue after growth... ");
+  char* old_end = sys_allocator->heap_end;
+  
   /* Allocate enough to trigger heap growth */
-  for (int i = 0; i < 100; i++) {
-    assert(mm_malloc(10000) != NULL);
+  for (int i = 0; i < 200; i++) {
+    if (!mm_malloc(10000)) break; 
   }
-
-  /* last_block should have moved after growth */
-  assert(sys_allocator->last_block != NULL);
-  printf("(initial=%p, after=%p) PASSED\n", initial_last, sys_allocator->last_block);
-
-  /* Test 5: Verify last_block is actually the last physical block */
-  printf("  Test 5: Verify last_block is last... ");
-  mm_reset_allocator();
-  void* a = mm_malloc(64);
-  void* b = mm_malloc(128);
-  void* c = mm_malloc(256);
-
-  /* last_block should have no next physical block */
-  tlsf_block_t* last = sys_allocator->last_block;
-  (void)last;
-  assert((char*)last + sizeof(tlsf_block_t) + (last->size & (~(size_t)3)) <= sys_allocator->heap_end);
+  
+  assert(sys_allocator->heap_end > old_end);
+  tlsf_block_t* new_epilogue = (tlsf_block_t*)(sys_allocator->heap_end - sizeof(tlsf_block_t));
+  assert(get_block_size(new_epilogue) == 0);
+  assert(is_block_used(new_epilogue));
   printf("PASSED\n");
 
-  mm_free(a);
-  mm_free(b);
-  mm_free(c);
-
-  printf("\nAll last_block tests passed!\n");
+  printf("\nAll sentinel tests passed!\n");
   return 0;
 }

@@ -190,7 +190,7 @@ static inline tlsf_block_t* split_block(mm_allocator_t* ctrl, tlsf_block_t* bloc
   if (next) {
     next->prev_phys = remainder;
     block_set_prev_free(next);
-  } else { ctrl->last_block = remainder; }
+  }
   return remainder;
 }
 
@@ -204,7 +204,6 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
 
       tlsf_block_t* next = block_next_safe(ctrl, prev);
       if (next) next->prev_phys = prev;
-      else ctrl->last_block = prev;
 
       block = prev;
     }
@@ -218,7 +217,6 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
 
     tlsf_block_t* next_next = block_next_safe(ctrl, block);
     if (next_next) next_next->prev_phys = block;
-    else ctrl->last_block = block;
   }
 
   return block;
@@ -232,16 +230,6 @@ static void create_free_block(mm_allocator_t* ctrl, void* start, size_t size) {
   block_set_size(block, block_data_size);
   block_set_free(block);
 
-  /* Linkage logic */
-  tlsf_block_t* prev = ctrl->last_block;
-  block->prev_phys = prev;
-
-  if (prev) {
-    if (block_is_free(prev)) block_set_prev_free(block);
-    else block_set_prev_used(block);
-  } else { block_set_prev_used(block); }
-
-  ctrl->last_block = block;
   block = coalesce(ctrl, block);
   insert_free_block(ctrl, block);
 }
@@ -260,18 +248,46 @@ static large_block_t* find_large_block(mm_allocator_t* ctrl, void* ptr) {
 }
 
 mm_allocator_t* mm_create(void* mem, size_t bytes) {
-  if (bytes < sizeof(mm_allocator_t) + TLSF_MIN_BLOCK_SIZE) return NULL;
+  /* Overhead: Allocator + Alignment Padding + Prologue + Min Block + Epilogue */
+  size_t overhead = sizeof(mm_allocator_t) + ALIGNMENT + sizeof(tlsf_block_t) + sizeof(tlsf_block_t);
+  if (bytes < overhead + TLSF_MIN_BLOCK_SIZE) return NULL;
 
   mm_allocator_t* allocator = (mm_allocator_t*)mem;
   memset(allocator, 0, sizeof(mm_allocator_t));
 
   char* heap_start = (char*)mem + sizeof(mm_allocator_t);
-  size_t heap_size = bytes - sizeof(mm_allocator_t);
+  
+  /* Align heap_start to ALIGNMENT */
+  uintptr_t start_addr = (uintptr_t)heap_start;
+  uintptr_t aligned_addr = (start_addr + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+  heap_start = (char*)aligned_addr;
 
   allocator->heap_start = heap_start;
   allocator->heap_end = (char*)mem + bytes;
 
-  create_free_block(allocator, heap_start, heap_size);
+  /* 1. Create Prologue (Sentinel) */
+  tlsf_block_t* prologue = (tlsf_block_t*)heap_start;
+  block_set_size(prologue, 0);
+  block_set_used(prologue);
+  block_set_prev_used(prologue);
+
+  /* 2. Create Epilogue (Sentinel) */
+  tlsf_block_t* epilogue = (tlsf_block_t*)(allocator->heap_end - sizeof(tlsf_block_t));
+  block_set_size(epilogue, 0);
+  block_set_used(epilogue);
+  block_set_prev_free(epilogue);
+
+  /* 3. Create Main Free Block */
+  char* middle_start = heap_start + sizeof(tlsf_block_t);
+  size_t middle_size = (char*)epilogue - middle_start;
+  
+  tlsf_block_t* block = (tlsf_block_t*)middle_start;
+  block->prev_phys = prologue;
+  block->size = 0; /* Initialize flags */
+  block_set_prev_used(block); /* Prologue is used */
+  epilogue->prev_phys = block;
+  
+  create_free_block(allocator, middle_start, middle_size);
 
   return allocator;
 }
@@ -435,9 +451,30 @@ static int global_grow_heap(size_t min_additional) {
 
   if (mprotect(sys_heap_base, new_cap, PROT_READ | PROT_WRITE) != 0) return -1;
 
+  /* Handle Epilogue Movement */
+  tlsf_block_t* old_epilogue = (tlsf_block_t*)(sys_heap_base + old_cap - sizeof(tlsf_block_t));
+  size_t old_prev_flags = old_epilogue->size & TLSF_PREV_FREE;
+
   sys_heap_cap = new_cap;
   sys_allocator->heap_end = sys_heap_base + new_cap;
-  create_free_block(sys_allocator, sys_heap_base + old_cap, new_cap - old_cap);
+  
+  /* Create new epilogue at the new end */
+  tlsf_block_t* new_epilogue = (tlsf_block_t*)(sys_allocator->heap_end - sizeof(tlsf_block_t));
+  block_set_size(new_epilogue, 0);
+  block_set_used(new_epilogue);
+  block_set_prev_free(new_epilogue); // Will be adjusted by coalesce/create_free_block
+
+  /* Convert old epilogue + new space into a free block */
+  /* We start at old_epilogue because it is now part of the free space */
+  tlsf_block_t* block = old_epilogue;
+  size_t added_size = new_cap - old_cap;
+  size_t total_new_size = added_size;
+  
+  /* Preserve the PREV_FREE state of the old epilogue! */
+  block->size = old_prev_flags; 
+  new_epilogue->prev_phys = block;
+
+  create_free_block(sys_allocator, block, total_new_size);
   return 0;
 }
 
@@ -523,8 +560,6 @@ void* mm_realloc(void*ptr, size_t size) {
         if (next_next) {
           next_next->prev_phys = block;
           block_set_prev_used(next_next);
-        } else {
-          sys_allocator->last_block = block;
         }
 
         tlsf_block_t* remainder = split_block(sys_allocator, block, aligned_size);

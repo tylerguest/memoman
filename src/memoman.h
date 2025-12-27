@@ -47,7 +47,6 @@ typedef struct mm_allocator {
   char* heap_start;
   char* heap_end;
   large_block_t* large_blocks;
-  tlsf_block_t* last_block;
 } mm_allocator_t;
 
 /* ==================== */
