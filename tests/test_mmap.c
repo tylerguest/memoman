@@ -71,7 +71,7 @@ static int test_growth_boundaries(void) {
   size_t allocated = 0;
   while (allocated < 1024 * 1024 - 1024) {
     ASSERT_NOT_NULL(mm_malloc(1000));
-    allocated += 1000 + sizeof(tlsf_block_t);
+    allocated += 1000 + offsetof(tlsf_block_t, next_free);
   }
 
   // this should trigger first mprotect growth

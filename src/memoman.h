@@ -27,8 +27,8 @@
 /* ======================= */
 
 typedef struct tlsf_block {
-  size_t size;
   struct tlsf_block* prev_phys;
+  size_t size;
   struct tlsf_block* next_free;
   struct tlsf_block* prev_free;
 } tlsf_block_t;

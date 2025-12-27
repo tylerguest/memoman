@@ -16,7 +16,7 @@ Production-ready TLSF allocator, Conte-style architecture.
 
 ### Exit Criteria
 
-- [ ] You can describe, in 5 bullet points, what core does vs what wrapper/system layer does
+- [x] You can describe, in 5 bullet points, what core does vs what wrapper/system layer does
 
 ---
 
@@ -42,7 +42,7 @@ Remove hidden globals from core logic.
 
 ### Exit Criteria
 
-- [ ] You can have two independent allocators in the same process, each managing different pools
+- [x] You can have two independent allocators in the same process, each managing different pools
 
 ---
 
@@ -76,8 +76,8 @@ If `block_is_prev_free(block)` is false, then `block->prev_phys` storage contain
 
 #### Exit Criteria
 
-- [ ] Header size matches Conte-class overhead (you can still keep debug-only extras behind `#ifdef MM_DEBUG`)
-- [ ] You never read `prev_phys` unless prev_free flag is set
+- [x] Header size matches Conte-class overhead (you can still keep debug-only extras behind `#ifdef MM_DEBUG`)
+- [x] You never read `prev_phys` unless prev_free flag is set
 
 ### 2.2 Sentinels
 
@@ -93,8 +93,8 @@ Add prologue/epilogue (or equivalent) sentinel blocks so:
 
 #### Exit Criteria
 
-- [ ] No boundary-condition branches in coalescing except sentinel checks
-- [ ] Alloc/free works for smallest and largest blocks near pool edges
+- [x] No boundary-condition branches in coalescing except sentinel checks
+- [x] Alloc/free works for smallest and largest blocks near pool edges
 
 ### 2.3 Invariants + Debug Assertions
 
