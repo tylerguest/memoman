@@ -1,36 +1,20 @@
+#include "test_framework.h"
 #include "../src/memoman.h"
-#include <stdio.h>
-#include <string.h>
 
-int main() {
-  printf("=== Reset Allocator Test ===\n");  
-  
-  printf("1. Initial state:\n");
-  mm_print_heap_stats();  
-  
-  printf("2. Make some allocations:\n");
+static int test_reset_basic(void) {
   char* ptr1 = (char*)mm_malloc(1000);
   char* ptr2 = (char*)mm_malloc(2000);
-  char* ptr3 = (char*)mm_malloc(3000);  
-  strcpy(ptr1, "First allocation");
-  strcpy(ptr2, "Second allocation");
-  strcpy(ptr3, "Third allocation");  
-  printf("   ptr1: %s\n", ptr1);
-  printf("   ptr2: %s\n", ptr2);
-  printf("   ptr3: %s\n", ptr3);  
-  mm_print_heap_stats();  
-  
-  printf("3. Reset the allocator:\n");
+  ASSERT_NOT_NULL(ptr1);
+  ASSERT_NOT_NULL(ptr2);
   mm_reset_allocator();
-  mm_print_heap_stats();  
-  
-  printf("4. Allocate again after reset:\n");
   char* new_ptr = (char*)mm_malloc(500);
-  strcpy(new_ptr, "After reset!");
-  printf("   new_ptr: %s at %p\n", new_ptr, (void*)new_ptr);  
-  mm_print_heap_stats();  
-  
-  printf("=== Reset Test Complete ===\n");
-  
-  return 0;
+  ASSERT_NOT_NULL(new_ptr);
+  return 1;
+}
+
+int main(void) {
+  TEST_SUITE_BEGIN("Reset");
+  RUN_TEST(test_reset_basic);
+  TEST_SUITE_END();
+  TEST_MAIN_END();
 }

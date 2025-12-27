@@ -1,17 +1,16 @@
+#include "test_framework.h"
 #include "../src/memoman.h"
-#include <string.h>
-#include <stdio.h>
 
-int main() {
+static int test_sanity(void) {
   char* str = mm_malloc(50);
+  ASSERT_NOT_NULL(str);
   strcpy(str, "Hello World!");
-  printf("String: %s\n", str);  
-  int* nums = mm_malloc(sizeof(int) * 5);
-  
-  for (int i = 0; i < 5; i++) {
-      nums[i] = i * 10;
-      printf("nums[%d] = %d\n", i, nums[i]);
-  }  
-  
-  return 0;
+  return 1;
+}
+
+int main(void) {
+  TEST_SUITE_BEGIN("Sanity");
+  RUN_TEST(test_sanity);
+  TEST_SUITE_END();
+  TEST_MAIN_END();
 }
