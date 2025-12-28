@@ -94,6 +94,23 @@ static inline void block_set_used(tlsf_block_t* block) { block->size &= ~TLSF_BL
 static inline void block_set_prev_free(tlsf_block_t* block) { block->size |= TLSF_PREV_FREE; }
 static inline void block_set_prev_used(tlsf_block_t* block) { block->size &= ~TLSF_PREV_FREE; }
 
+static inline void block_set_magic(tlsf_block_t* block) {
+#ifdef DEBUG_OUTPUT
+  block->magic = TLSF_BLOCK_MAGIC;
+#else
+  (void)block;
+#endif
+}
+
+static inline int block_check_magic(tlsf_block_t* block) {
+#ifdef DEBUG_OUTPUT
+  return block->magic == TLSF_BLOCK_MAGIC;
+#else
+  (void)block;
+  return 1;
+#endif
+}
+
 static inline tlsf_block_t* block_prev(tlsf_block_t* block) { return block->prev_phys; }
 
 static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* block) {
@@ -180,6 +197,7 @@ static inline tlsf_block_t* split_block(mm_allocator_t* ctrl, tlsf_block_t* bloc
   block_set_size(block, size);
 
   tlsf_block_t* remainder = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + size);
+  block_set_magic(remainder);
   block_set_size(remainder, remainder_size);
   block_set_free(remainder);
   remainder->prev_phys = block;
@@ -227,6 +245,7 @@ static void create_free_block(mm_allocator_t* ctrl, void* start, size_t size) {
 
   tlsf_block_t* block = (tlsf_block_t*)start;
   size_t block_data_size = size - BLOCK_HEADER_OVERHEAD;
+  block_set_magic(block);
   block_set_size(block, block_data_size);
   block_set_free(block);
 
@@ -252,6 +271,9 @@ int mm_validate_inst(mm_allocator_t* ctrl) {
     /* Check Alignment & Bounds */
     CHECK(((uintptr_t)curr % ALIGNMENT == 0), "Block not aligned");
     CHECK((char*)curr >= ctrl->heap_start && (char*)curr < ctrl->heap_end, "Block out of bounds");
+    #ifdef DEBUG_OUTPUT
+    CHECK(curr->magic == TLSF_BLOCK_MAGIC, "Block magic corrupted");
+    #endif
 
     size_t size = block_size(curr);
     int is_free = block_is_free(curr);
@@ -362,12 +384,14 @@ mm_allocator_t* mm_create(void* mem, size_t bytes) {
   block_set_size(prologue, 0);
   block_set_used(prologue);
   block_set_prev_used(prologue);
+  block_set_magic(prologue);
 
   /* 2. Create Epilogue (Sentinel) */
   tlsf_block_t* epilogue = (tlsf_block_t*)(allocator->heap_end - BLOCK_HEADER_OVERHEAD);
   block_set_size(epilogue, 0);
   block_set_used(epilogue);
   block_set_prev_free(epilogue);
+  block_set_magic(epilogue);
 
   /* 3. Create Main Free Block */
   char* middle_start = heap_start + BLOCK_HEADER_OVERHEAD;
@@ -449,7 +473,17 @@ void mm_free_inst(mm_allocator_t* ctrl, void* ptr) {
     return;
   }
 
+  if ((uintptr_t)ptr % ALIGNMENT != 0) {
+    fprintf(stderr, "[Memoman] Error: Invalid pointer alignment in free()\n");
+    return;
+  }
+
   tlsf_block_t* block = user_to_block(ptr);
+  if (!block_check_magic(block)) {
+    fprintf(stderr, "[Memoman] Error: Invalid block magic in free()\n");
+    return;
+  }
+
   if (block_is_free(block)) return;  /* Double free protection */
 
   block_mark_as_free(ctrl, block);
@@ -559,6 +593,7 @@ static int global_grow_heap(size_t min_additional) {
   block_set_size(new_epilogue, 0);
   block_set_used(new_epilogue);
   block_set_prev_free(new_epilogue); // Will be adjusted by coalesce/create_free_block
+  block_set_magic(new_epilogue);
 
   /* Convert old epilogue + new space into a free block */
   /* We start at old_epilogue because it is now part of the free space */
@@ -632,6 +667,8 @@ void* mm_realloc(void*ptr, size_t size) {
     if ((uintptr_t)ptr % ALIGNMENT != 0) return NULL;
 
     tlsf_block_t* block = user_to_block(ptr);
+    if (!block_check_magic(block)) return NULL;
+
     size_t current_size = block_size(block);
     size_t aligned_size = align_size(size);
     if (aligned_size < TLSF_MIN_BLOCK_SIZE) aligned_size = TLSF_MIN_BLOCK_SIZE;

@@ -21,6 +21,7 @@
 #define TLSF_PREV_FREE (1 << 1)
 #define TLSF_SIZE_MASK (~(size_t)3)
 #define LARGE_BLOCK_MAGIC 0xDEADB10C
+#define TLSF_BLOCK_MAGIC 0xCAFEBABE
 
 #define BLOCK_HEADER_OVERHEAD offsetof(tlsf_block_t, next_free)
 
@@ -31,6 +32,8 @@
 typedef struct tlsf_block {
   struct tlsf_block* prev_phys;
   size_t size;
+  uint32_t magic;
+  char pad[12];
   struct tlsf_block* next_free;
   struct tlsf_block* prev_free;
 } tlsf_block_t;

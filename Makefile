@@ -1,60 +1,44 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99
-LDFLAGS =
-DEBUG_FLAGS = -g -DDEBUG_OUTPUT
-BENCHMARK_FLAGS = -O3 -march=native -DNDEBUG
+CFLAGS = -Wall -Wextra -std=c99 -g -DDEBUG_OUTPUT -Isrc
+SRC = src/memoman.c
+TEST_DIR = tests
+BIN_DIR = tests/bin
 
-# Auto-detect all test files
-TEST_SOURCES = $(wildcard tests/test*.c)
-# Convert .c filenames to bin filenames for the target list
-TESTS = $(patsubst tests/%.c,tests/bin/%,$(TEST_SOURCES))
+TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)
+TEST_BINS = $(patsubst $(TEST_DIR)/%.c, $(BIN_DIR)/%, $(TEST_SRCS))
 
-all: CFLAGS += $(DEBUG_FLAGS)
-all: $(TESTS)
+.PHONY: all clean debug run
 
-# --- EXCEPTION RULE: White-Box Testing ---
-# 1. Matches ONLY test_mapping_unit
-# 2. Depends on memoman.c (so edits trigger rebuild) but does NOT link it (to avoid double definition)
-tests/bin/test_mapping_unit: tests/test_mapping_unit.c src/memoman.c src/memoman.h
-	@mkdir -p tests/bin
-	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/memoman.c tests/test_mapping_unit.c
-
-# --- GENERIC RULE: Black-Box Testing ---
-# Matches all other tests and links memoman.c normally
-tests/bin/%: tests/%.c src/memoman.c src/memoman.h
-	@mkdir -p tests/bin
-	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/memoman.c $<
-
-benchmark: clean
-	@mkdir -p tests/bin
-	@$(MAKE) CFLAGS="$(CFLAGS) $(BENCHMARK_FLAGS)" LDFLAGS="$(LDFLAGS) -lrt" $(TESTS)
-	@echo "Built with optimizations for benchmarking"
-
-debug: CFLAGS += $(DEBUG_FLAGS)
-debug: clean $(TESTS)
+all: $(TEST_BINS)
 	@echo "Built with debug output enabled"
 
+$(BIN_DIR)/%: $(TEST_DIR)/%.c $(SRC)
+	@mkdir -p $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $(SRC) $<
+
 clean:
-	rm -f tests/bin/*
-	rmdir tests/bin 2>/dev/null || true
+	rm -f $(BIN_DIR)/*
+	rmdir $(BIN_DIR) 2>/dev/null || true
+
+debug: all
 
 run: all
 	@echo "=== Running All Tests ==="
 	@failed=0; \
-	for test in $(TESTS); do \
-		if $$test > /dev/null 2>&1; then \
-			echo "PASSED: $$(basename $$test)"; \
+	for test in $(TEST_BINS); do \
+		name=$$(basename $$test); \
+		output=$$(./$$test 2>&1); \
+		exit_code=$$?; \
+		if [ $$exit_code -eq 0 ]; then \
+			echo "PASSED: $$name"; \
 		else \
-			echo "FAILED: $$(basename $$test)"; \
+			echo "FAILED: $$name"; \
+			echo "$$output" | sed 's/^/  /'; \
 			failed=$$((failed + 1)); \
 		fi; \
 	done; \
 	echo "==================="; \
-	if [ $$failed -eq 0 ]; then \
-		echo "All tests passed!"; \
-	else \
+	if [ $$failed -gt 0 ]; then \
 		echo "$$failed test(s) failed"; \
 		exit 1; \
-	fi;
-
-.PHONY: all benchmark debug clean run
+	fi

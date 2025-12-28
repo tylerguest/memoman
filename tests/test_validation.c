@@ -121,6 +121,58 @@ static int test_corrupt_coalescing() {
   return 1;
 }
 
+static int test_corrupt_magic() {
+  TEST_RESET();
+  void* p = mm_malloc(64);
+  tlsf_block_t* b = get_block(p);
+  
+  /* Save valid magic */
+  uint32_t valid_magic = b->magic;
+  
+  /* Corrupt it */
+  b->magic = 0xDEADBEEF;
+
+  printf("  (Expect error message below) -> ");
+  int result = mm_validate();
+
+  /* Restore */
+  b->magic = valid_magic;
+  
+  ASSERT(result == 0);
+  
+  mm_free(p);
+  return 1;
+}
+
+static int test_free_safety_check() {
+  TEST_RESET();
+  void* p = mm_malloc(64);
+  tlsf_block_t* b = get_block(p);
+  
+  uint32_t valid_magic = b->magic;
+  
+  /* 1. Corrupt Magic and try to free */
+  b->magic = 0xBADF00D;
+  
+  size_t free_space_before = mm_get_free_space();
+  
+  printf("  (Expect error message below) -> ");
+  mm_free(p);
+  
+  size_t free_space_after = mm_get_free_space();
+  
+  /* Should have rejected the free, so free space unchanged */
+  ASSERT_EQ(free_space_before, free_space_after);
+  
+  /* 2. Restore and free properly */
+  b->magic = valid_magic;
+  mm_free(p);
+  
+  ASSERT_GT(mm_get_free_space(), free_space_before);
+  
+  return 1;
+}
+
 int main() {
   TEST_SUITE_BEGIN("Validation API");
   RUN_TEST(test_valid_heap);
@@ -128,6 +180,8 @@ int main() {
   RUN_TEST(test_corrupt_overflow);
   RUN_TEST(test_corrupt_free_list);
   RUN_TEST(test_corrupt_coalescing);
+  RUN_TEST(test_corrupt_magic);
+  RUN_TEST(test_free_safety_check);
   TEST_SUITE_END();
   TEST_MAIN_END();
 }

@@ -33,7 +33,7 @@ static int test_overhead_reduction(void) {
   
   /* Sanity check specific value for 64-bit to ensure we actually changed the layout */
   if (sizeof(void*) == 8) {
-      ASSERT_EQ(overhead, 16);
+      ASSERT_EQ(overhead, 32);
   }
 
   /* Verify we are actually looking at a block header by checking the size field */
