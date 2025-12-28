@@ -29,8 +29,6 @@ size_t sys_heap_cap = 0;
 /* === Utility Functions === */
 /* ========================= */
 
-#define BLOCK_HEADER_OVERHEAD offsetof(tlsf_block_t, next_free)
-
 static inline size_t align_size(size_t size) { return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1); }
 static inline void* block_to_user(tlsf_block_t* block) { return (char*)block + BLOCK_HEADER_OVERHEAD; }
 static inline tlsf_block_t* user_to_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_HEADER_OVERHEAD); }
@@ -240,6 +238,87 @@ static void create_free_block(mm_allocator_t* ctrl, void* start, size_t size) {
 /* === Public Instance API === */
 /* =========================== */
 
+#ifdef MM_DEBUG
+static void mm_check_integrity(mm_allocator_t* ctrl) {
+  if (!ctrl) return;
+
+  /* 1. Physical Heap Walk */
+  tlsf_block_t* prev = NULL;
+  tlsf_block_t* curr = (tlsf_block_t*)ctrl->heap_start;
+
+  while (curr && (char*)curr < ctrl->heap_end) {
+    /* Check Alignment & Bounds */
+    assert(((uintptr_t)curr % ALIGNMENT == 0) && "Block not aligned");
+    assert((char*)curr >= ctrl->heap_start && (char*)curr < ctrl->heap_end && "Block out of bounds");
+
+    size_t size = block_size(curr);
+    int is_free = block_is_free(curr);
+    int is_prev_free = block_is_prev_free(curr);
+
+    /* Check Ghost Pointer / Prev Free Flag Consistency */
+    if (prev) {
+      int prev_actual_free = block_is_free(prev);
+      assert(is_prev_free == prev_actual_free && "PREV_FREE flag desync with actual prev block");
+
+      if (is_prev_free) {
+        /* Ghost pointer must point to prev */
+        assert(curr->prev_phys == prev && "Ghost prev_phys pointer invalid");
+        /* Coalescing Invariant: No two free blocks adjacent */
+        assert(!is_free && "Adjacent free blocks detected (coalescing failed)");
+      }
+    }
+
+    /* Sentinel Checks */
+    if (size == 0) {
+      if ((char*)curr == ctrl->heap_start) assert(!is_free && "Prologue must be used");
+      else {
+        assert(!is_free && "Epilogue must be used");
+        assert((char*)curr + BLOCK_HEADER_OVERHEAD == ctrl->heap_end && "Epilogue not at heap end");
+        break; 
+      }
+    }
+
+    prev = curr;
+    curr = block_next_safe(ctrl, curr);
+  }
+
+  /* 2. Logical Free List Walk */
+  for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
+    for (int sl = 0; sl < TLSF_SLI_COUNT; sl++) {
+      tlsf_block_t* block = ctrl->blocks[fl][sl];
+      
+      /* Bitmap Consistency */
+      int has_bit = (ctrl->sl_bitmap[fl] & (1U << sl)) != 0;
+      if (block) assert(has_bit && "Bitmap cleared but list not empty");
+      else {
+        assert(!has_bit && "Bitmap set but list empty");
+        continue;
+      }
+
+      tlsf_block_t* walk = block;
+      tlsf_block_t* list_prev = NULL;
+      int count = 0;
+      
+      while (walk) {
+        assert(count++ < 10000 && "Infinite loop detected in free list");
+        assert(block_is_free(walk) && "Used block found in free list");
+        assert(walk->prev_free == list_prev && "Free list prev pointer broken");
+        
+        /* Size Mapping Check */
+        int mapped_fl, mapped_sl;
+        mapping(block_size(walk), &mapped_fl, &mapped_sl);
+        assert(mapped_fl == fl && mapped_sl == sl && "Block in wrong free list bucket");
+
+        list_prev = walk;
+        walk = walk->next_free;
+      }
+    }
+  }
+}
+#else
+#define mm_check_integrity(ctrl) ((void)0)
+#endif
+
 static large_block_t* find_large_block(mm_allocator_t* ctrl, void* ptr) {
   large_block_t* lb = ctrl->large_blocks;
   while (lb) {
@@ -307,6 +386,7 @@ void mm_destroy_instance(mm_allocator_t* allocator) {
 
 void* mm_malloc_inst(mm_allocator_t* ctrl, size_t size) {
   if (!ctrl || size == 0) return NULL;
+  mm_check_integrity(ctrl);
 
   if (size >= LARGE_ALLOC_THRESHOLD) {
     size_t total = sizeof(large_block_t) + align_size(size);
@@ -339,11 +419,13 @@ void* mm_malloc_inst(mm_allocator_t* ctrl, size_t size) {
   tlsf_block_t* next = block_next_safe(ctrl, block);
   if (next) block_set_prev_used(next);
 
+  mm_check_integrity(ctrl);
   return block_to_user(block);
 }
 
 void mm_free_inst(mm_allocator_t* ctrl, void* ptr) {
   if (!ptr || !ctrl) return;
+  mm_check_integrity(ctrl);
 
   if ((char*)ptr < ctrl->heap_start || (char*)ptr >= ctrl->heap_end) {
     large_block_t* lb = find_large_block(ctrl, ptr);
@@ -362,6 +444,7 @@ void mm_free_inst(mm_allocator_t* ctrl, void* ptr) {
   block_mark_as_free(ctrl, block);
   block = coalesce(ctrl, block);
   insert_free_block(ctrl, block);
+  mm_check_integrity(ctrl);
 }
 
 /* =========================== */
@@ -531,6 +614,7 @@ void* mm_realloc(void*ptr, size_t size) {
   if (size == 0) { mm_free(ptr); return NULL; }
   
   if (!sys_allocator) return NULL;
+  mm_check_integrity(sys_allocator);
 
   /* Handle Main Heap Blocks */
   if ((char*)ptr >= sys_allocator->heap_start && (char*)ptr < sys_allocator->heap_end) {
@@ -545,6 +629,7 @@ void* mm_realloc(void*ptr, size_t size) {
     if (aligned_size <= current_size) {
       tlsf_block_t* remainder = split_block(sys_allocator, block, aligned_size);
       if (remainder) insert_free_block(sys_allocator, remainder);
+      mm_check_integrity(sys_allocator);
       return ptr;
     }
 
@@ -566,6 +651,7 @@ void* mm_realloc(void*ptr, size_t size) {
 
         tlsf_block_t* remainder = split_block(sys_allocator, block, aligned_size);
         if (remainder) insert_free_block(sys_allocator, remainder);
+        mm_check_integrity(sys_allocator);
         return ptr;
       }
     }

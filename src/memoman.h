@@ -22,6 +22,8 @@
 #define TLSF_SIZE_MASK (~(size_t)3)
 #define LARGE_BLOCK_MAGIC 0xDEADB10C
 
+#define BLOCK_HEADER_OVERHEAD offsetof(tlsf_block_t, next_free)
+
 /* ======================= */
 /* === Data Structures === */
 /* ======================= */
