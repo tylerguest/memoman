@@ -5,7 +5,7 @@ This document tracks the remaining work to make **memoman** a production-grade, 
 ## Phase 1: Feature Parity (The "Conte" Standard)
 These features are standard in serious TLSF implementations but currently missing in Memoman.
 
-- [ ] **Aligned Allocation API (`mm_memalign`)**
+- [x] **Aligned Allocation API (`mm_memalign`)**
   - **Goal**: Support arbitrary alignment requests (e.g., 4KB for pages, 64B for cache lines).
   - **Requirement**: Handle padding, gap filling, and potential splitting of the gap.
   

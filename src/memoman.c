@@ -14,9 +14,6 @@ mm_allocator_t* sys_allocator = NULL;
 char* sys_heap_base = NULL; 
 size_t sys_heap_cap = 0;
 
-/* Forward declarations for helpers used before their definitions */
-static inline size_t block_size(tlsf_block_t* block);
-
 static inline size_t align_size(size_t size) {
     return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
 }
@@ -25,6 +22,43 @@ static inline int fls_generic(size_t word) { return (sizeof(size_t) * 8) - 1 - _
 static inline int ffs_generic(uint32_t word) {
   int result = __builtin_ffs(word);
   return result ? result - 1 : -1;
+}
+
+static inline size_t block_size(tlsf_block_t* block) { return block->size & TLSF_SIZE_MASK; }
+static inline int block_is_free(tlsf_block_t* block) { return (block->size & TLSF_BLOCK_FREE) != 0; }
+static inline int block_is_prev_free(tlsf_block_t* block) { return (block->size & TLSF_PREV_FREE) != 0; }
+static inline void block_set_size(tlsf_block_t* block, size_t size) {
+  size_t flags = block->size & ~TLSF_SIZE_MASK;
+  block->size = size | flags;
+}
+static inline void block_set_free(tlsf_block_t* block) { block->size |= TLSF_BLOCK_FREE; }
+static inline void block_set_used(tlsf_block_t* block) { block->size &= ~TLSF_BLOCK_FREE; }
+static inline void block_set_prev_free(tlsf_block_t* block) { block->size |= TLSF_PREV_FREE; }
+static inline void block_set_prev_used(tlsf_block_t* block) { block->size &= ~TLSF_PREV_FREE; }
+
+static inline void block_set_magic(tlsf_block_t* block) {
+#ifdef DEBUG_OUTPUT
+  block->magic = TLSF_BLOCK_MAGIC;
+#else
+  (void)block;
+#endif
+}
+
+static inline int block_check_magic(tlsf_block_t* block) {
+#ifdef DEBUG_OUTPUT
+  return block->magic == TLSF_BLOCK_MAGIC;
+#else
+  (void)block;
+  return 1;
+#endif
+}
+
+static inline tlsf_block_t* block_prev(tlsf_block_t* block) { 
+  return *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*)));
+}
+
+static inline void block_set_prev(tlsf_block_t* block, tlsf_block_t* prev) { 
+  *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*))) = prev;
 }
 
 static inline void mapping(size_t size, int* fli, int* sli) {
@@ -127,43 +161,6 @@ static inline tlsf_block_t* user_to_block(void* ptr) {
 
 void mm_get_mapping_indices(size_t size, int* fl, int* sl) { mapping(size, fl, sl); }
 
-
-static inline size_t block_size(tlsf_block_t* block) { return block->size & TLSF_SIZE_MASK; }
-static inline int block_is_free(tlsf_block_t* block) { return (block->size & TLSF_BLOCK_FREE) != 0; }
-static inline int block_is_prev_free(tlsf_block_t* block) { return (block->size & TLSF_PREV_FREE) != 0; }
-static inline void block_set_size(tlsf_block_t* block, size_t size) {
-  size_t flags = block->size & ~TLSF_SIZE_MASK;
-  block->size = size | flags;
-}
-static inline void block_set_free(tlsf_block_t* block) { block->size |= TLSF_BLOCK_FREE; }
-static inline void block_set_used(tlsf_block_t* block) { block->size &= ~TLSF_BLOCK_FREE; }
-static inline void block_set_prev_free(tlsf_block_t* block) { block->size |= TLSF_PREV_FREE; }
-static inline void block_set_prev_used(tlsf_block_t* block) { block->size &= ~TLSF_PREV_FREE; }
-
-static inline void block_set_magic(tlsf_block_t* block) {
-#ifdef DEBUG_OUTPUT
-  block->magic = TLSF_BLOCK_MAGIC;
-#else
-  (void)block;
-#endif
-}
-
-static inline int block_check_magic(tlsf_block_t* block) {
-#ifdef DEBUG_OUTPUT
-  return block->magic == TLSF_BLOCK_MAGIC;
-#else
-  (void)block;
-  return 1;
-#endif
-}
-
-static inline tlsf_block_t* block_prev(tlsf_block_t* block) { 
-  return *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*)));
-}
-
-static inline void block_set_prev(tlsf_block_t* block, tlsf_block_t* prev) { 
-  *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*))) = prev;
-}
 
 static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* block) {
   tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + block_size(block));
