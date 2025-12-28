@@ -11,6 +11,8 @@
 #define ALIGNMENT 8
 #define LARGE_ALLOC_THRESHOLD (1024 * 1024)
 #define INITIAL_HEAP_SIZE (1024 * 1024)
+#define HEAP_GROWTH_FACTOR 2
+#define MAX_HEAP_SIZE (1UL << 30) /* 1 GiB reserved virtual space */
 #define TLSF_MIN_BLOCK_SIZE 24 /* Constraint: 32B physical min - 8B overhead */
 #define TLSF_FLI_MAX 30
 #define TLSF_SLI 5
@@ -87,6 +89,7 @@ void* mm_malloc_inst(mm_allocator_t* allocator, size_t size);
 void mm_free_inst(mm_allocator_t* allocator, void* ptr);
 void* mm_calloc_inst(mm_allocator_t* allocator, size_t nmemb, size_t size);
 void* mm_realloc_inst(mm_allocator_t* allocator, void* ptr, size_t size);
+void* mm_memalign_inst(mm_allocator_t* allocator, size_t alignment, size_t size);
 
 /* Get usable size for a pointer within a specific instance */
 size_t mm_get_usable_size(mm_allocator_t* allocator, void* ptr);
@@ -111,6 +114,7 @@ void* mm_malloc(size_t size);                  // Allocate from global instance
 void mm_free(void* ptr);                       // Free from global instance
 void* mm_calloc(size_t nmemb, size_t size);
 void* mm_realloc(void* ptr, size_t size);
+void* mm_memalign(size_t alignment, size_t size);
 size_t mm_malloc_usable_size(void* ptr);
 void mm_print_heap_stats(void);
 size_t mm_get_free_space(void);

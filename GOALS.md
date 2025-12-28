@@ -32,8 +32,3 @@ These features are standard in serious TLSF implementations but currently missin
 
 - [ ] **Known Limitations**
   - Goal: Explicitly list tradeoffs (e.g., 32-byte physical min block size).
-
-## Current Focus
-1. **Aligned Allocation**: Implement `mm_memalign`.
-2. **Discontiguous Pools**: Refactor to support multiple memory regions per instance.
-3. **Portability**: Ensure 32-bit compatibility.
