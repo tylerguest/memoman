@@ -45,10 +45,12 @@ static inline int ffs_generic(uint32_t word) {
 /* ============================== */
 
 static inline void mapping(size_t size, int* fl, int* sl) {
-  if (size < TLSF_MIN_BLOCK_SIZE) { *fl = 0; *sl = 0; }
-  else {
+  if (size < (1 << TLSF_FLI_OFFSET)) {
+    *fl = 0;
+    *sl = (int)size / ALIGNMENT;
+  } else {
     int fli = fls_generic(size);
-    *fl = fli - TLSF_FLI_OFFSET;
+    *fl = fli - (TLSF_FLI_OFFSET - 1);
     *sl = (int)((size >> (fli - TLSF_SLI)) & (TLSF_SLI_COUNT - 1));
 
     if (*fl < 0) { *fl = 0; *sl = 0; }

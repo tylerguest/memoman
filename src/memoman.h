@@ -8,14 +8,14 @@
 /* === Internal Constants === */
 /* ========================== */
 
-#define ALIGNMENT 16
+#define ALIGNMENT 8
 #define LARGE_ALLOC_THRESHOLD (1024 * 1024)
 #define INITIAL_HEAP_SIZE (1024 * 1024)
-#define TLSF_MIN_BLOCK_SIZE 16
+#define TLSF_MIN_BLOCK_SIZE 16 /* Constraint: sizeof(tlsf_block_t) - BLOCK_HEADER_OVERHEAD */
 #define TLSF_FLI_MAX 30
 #define TLSF_SLI 5
 #define TLSF_SLI_COUNT (1 << TLSF_SLI)
-#define TLSF_FLI_OFFSET 4
+#define TLSF_FLI_OFFSET 8 /* TLSF_SLI (5) + LOG2_ALIGN (3) */
 
 #define TLSF_BLOCK_FREE (1 << 0)
 #define TLSF_PREV_FREE (1 << 1)
