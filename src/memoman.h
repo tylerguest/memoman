@@ -25,7 +25,11 @@
 #define LARGE_BLOCK_MAGIC 0xDEADB10C
 #define TLSF_BLOCK_MAGIC 0xCAFEBABE
 
+#ifdef DEBUG_OUTPUT
+#define BLOCK_HEADER_OVERHEAD (sizeof(size_t) + sizeof(uint32_t) + 12)
+#else
 #define BLOCK_HEADER_OVERHEAD sizeof(size_t)
+#endif
 
 /* ======================= */
 /* === Data Structures === */

@@ -6,7 +6,7 @@ extern mm_allocator_t* sys_allocator;
 
 /* Helper to access block fields */
 static inline tlsf_block_t* user_to_block_helper(void* ptr) {
-  return (tlsf_block_t*)((char*)ptr - sizeof(size_t));
+  return (tlsf_block_t*)((char*)ptr - BLOCK_HEADER_OVERHEAD);
 }
 
 static int test_sentinel_linkage(void) {

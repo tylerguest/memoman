@@ -7,7 +7,7 @@ extern mm_allocator_t* sys_allocator;
 
 /* Helper to access block fields */
 static inline tlsf_block_t* user_to_block_helper(void* ptr) {
-  return (tlsf_block_t*)((char*)ptr - sizeof(size_t));
+  return (tlsf_block_t*)((char*)ptr - BLOCK_HEADER_OVERHEAD);
 }
 
 static int test_overhead_reduction(void) {
@@ -24,15 +24,17 @@ static int test_overhead_reduction(void) {
    * It should be sizeof(size_t) = 8 bytes on 64-bit.
    */
   size_t overhead = (char*)ptr - (char*)block;
-  size_t expected = sizeof(size_t);
+  size_t expected = BLOCK_HEADER_OVERHEAD;
   
   ASSERT_EQ(overhead, expected);
   
+#ifndef DEBUG_OUTPUT
   /* Sanity check specific value for 64-bit to ensure we actually changed the layout */
   if (sizeof(void*) == 8) {
       /* 8 bytes size */
       ASSERT_EQ(overhead, 8);
   }
+#endif
 
   /* Verify we are actually looking at a block header by checking the size field */
   size_t size = block->size & TLSF_SIZE_MASK;
