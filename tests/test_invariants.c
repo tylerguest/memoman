@@ -5,7 +5,7 @@
 /* Helper to acccess internal block structure */
 static tlsf_block_t* get_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_HEADER_OVERHEAD); }
 
-static tlsf_block_t* get_prev_phys(tlsf_block_t* b) { return b->prev_phys; }
+static tlsf_block_t* get_prev_phys(tlsf_block_t* b) { return *((tlsf_block_t**)((char*)b - sizeof(tlsf_block_t*))); }
 
 static int test_coalescing_invariants() {
   TEST_RESET();

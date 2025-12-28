@@ -30,8 +30,8 @@ size_t sys_heap_cap = 0;
 /* ========================= */
 
 static inline size_t align_size(size_t size) { return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1); }
-static inline void* block_to_user(tlsf_block_t* block) { return (char*)block + BLOCK_HEADER_OVERHEAD; }
-static inline tlsf_block_t* user_to_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_HEADER_OVERHEAD); }
+static inline void* block_to_user(tlsf_block_t* block) { return (char*)block + sizeof(size_t); }
+static inline tlsf_block_t* user_to_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - sizeof(size_t)); }
 
 /* Bitwise Ops */
 static inline int fls_generic(size_t word) { return (sizeof(size_t) * 8) - 1 - __builtin_clzl(word); }
@@ -114,11 +114,11 @@ static inline int block_check_magic(tlsf_block_t* block) {
 }
 
 static inline tlsf_block_t* block_prev(tlsf_block_t* block) { 
-  return block->prev_phys; 
+  return *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*)));
 }
 
 static inline void block_set_prev(tlsf_block_t* block, tlsf_block_t* prev) { 
-  block->prev_phys = prev; 
+  *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*))) = prev;
 }
 
 static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* block) {
@@ -212,7 +212,6 @@ static inline tlsf_block_t* split_block(mm_allocator_t* ctrl, tlsf_block_t* bloc
   block_set_size(remainder, remainder_size);
   block_set_free(remainder);
 
-  block_set_prev(remainder, block);
   block_set_prev_used(remainder);
 
   tlsf_block_t* next = block_next_safe(ctrl, remainder);
@@ -421,7 +420,6 @@ mm_allocator_t* mm_create(void* mem, size_t bytes) {
   tlsf_block_t* block = (tlsf_block_t*)middle_start;
   block->size = 0; /* Initialize flags */
   block_set_prev_used(block); /* Prologue is used */
-  block_set_prev(block, prologue);
   block_set_prev(epilogue, block);
   
   create_free_block(allocator, middle_start, middle_size);
@@ -565,7 +563,6 @@ static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
         
         tlsf_block_t* next_next = block_next_safe(ctrl, block);
         if (next_next) {
-          block_set_prev(next_next, block);
           block_set_prev_used(next_next);
         }
 
@@ -728,7 +725,6 @@ static int global_grow_heap(size_t min_additional) {
   /* Preserve the PREV_FREE state of the old epilogue! */
   block->size = old_prev_flags; 
   block_set_prev(new_epilogue, block);
-
   create_free_block(sys_allocator, block, total_new_size);
   return 0;
 }

@@ -7,8 +7,7 @@ extern mm_allocator_t* sys_allocator;
 
 /* Helper to access block fields */
 static inline tlsf_block_t* user_to_block_helper(void* ptr) {
-  /* We know BLOCK_HEADER_OVERHEAD is offsetof(tlsf_block_t, next_free) */
-  return (tlsf_block_t*)((char*)ptr - offsetof(tlsf_block_t, next_free));
+  return (tlsf_block_t*)((char*)ptr - sizeof(size_t));
 }
 
 static int test_overhead_reduction(void) {
@@ -22,22 +21,17 @@ static int test_overhead_reduction(void) {
   
   /* 
    * Verify the overhead is reduced.
-   * It should be offsetof(tlsf_block_t, next_free).
-   * On 64-bit: prev_phys(8) + size(8) = 16 bytes.
-   * (Old overhead was 32 bytes).
+   * It should be sizeof(size_t) = 8 bytes on 64-bit.
    */
   size_t overhead = (char*)ptr - (char*)block;
-  size_t expected = offsetof(tlsf_block_t, next_free);
+  size_t expected = sizeof(size_t);
   
   ASSERT_EQ(overhead, expected);
   
   /* Sanity check specific value for 64-bit to ensure we actually changed the layout */
   if (sizeof(void*) == 8) {
-#ifdef DEBUG_OUTPUT
-      ASSERT_EQ(overhead, 32);
-#else
-      ASSERT_EQ(overhead, 16);
-#endif
+      /* 8 bytes size */
+      ASSERT_EQ(overhead, 8);
   }
 
   /* Verify we are actually looking at a block header by checking the size field */
@@ -68,8 +62,8 @@ static int test_data_overlap(void) {
   void* pattern = (void*)0xDEADBEEF;
   *overlap_ptr = pattern;
   
-  /* Verify we wrote to the space occupied by next_free in the struct definition */
-  ASSERT_EQ(block->next_free, pattern);
+  /* Verify we wrote to the space occupied by next_free */
+  ASSERT_EQ(block->next_free, (tlsf_block_t*)pattern);
   
   /* Verify we didn't corrupt the header fields (size/prev_phys) */
   size_t size = block->size & TLSF_SIZE_MASK;

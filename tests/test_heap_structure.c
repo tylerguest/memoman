@@ -6,11 +6,7 @@ extern mm_allocator_t* sys_allocator;
 
 /* Helper to access block fields */
 static inline tlsf_block_t* user_to_block_helper(void* ptr) {
-  return (tlsf_block_t*)((char*)ptr - offsetof(tlsf_block_t, next_free));
-}
-
-static tlsf_block_t* get_prev_phys(tlsf_block_t* b) {
-  return b->prev_phys;
+  return (tlsf_block_t*)((char*)ptr - sizeof(size_t));
 }
 
 static int test_sentinel_linkage(void) {
@@ -24,11 +20,9 @@ static int test_sentinel_linkage(void) {
   /* The first block must have PREV_USED set (Prologue is used) */
   ASSERT_EQ(block->size & TLSF_PREV_FREE, 0);
 
-  tlsf_block_t* prev = get_prev_phys(block);
-  /* The previous physical block must be the Prologue */
-  ASSERT_EQ(prev, (tlsf_block_t*)sys_allocator->heap_start);
-  ASSERT_EQ(prev->size & TLSF_SIZE_MASK, 0);
-  ASSERT_EQ(prev->size & TLSF_BLOCK_FREE, 0);
+  /* Note: Since PREV_USED is set, we cannot safely access prev_phys 
+   * because it overlaps with the prologue's data (which is just the prologue header itself)
+   */
   mm_free(ptr);
   return 1;
 }

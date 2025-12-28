@@ -11,7 +11,7 @@
 #define ALIGNMENT 8
 #define LARGE_ALLOC_THRESHOLD (1024 * 1024)
 #define INITIAL_HEAP_SIZE (1024 * 1024)
-#define TLSF_MIN_BLOCK_SIZE 16 /* Constraint: sizeof(tlsf_block_t) - BLOCK_HEADER_OVERHEAD */
+#define TLSF_MIN_BLOCK_SIZE 24 /* Constraint: 32B physical min - 8B overhead */
 #define TLSF_FLI_MAX 30
 #define TLSF_SLI 5
 #define TLSF_SLI_COUNT (1 << TLSF_SLI)
@@ -23,14 +23,13 @@
 #define LARGE_BLOCK_MAGIC 0xDEADB10C
 #define TLSF_BLOCK_MAGIC 0xCAFEBABE
 
-#define BLOCK_HEADER_OVERHEAD offsetof(tlsf_block_t, next_free)
+#define BLOCK_HEADER_OVERHEAD sizeof(size_t)
 
 /* ======================= */
 /* === Data Structures === */
 /* ======================= */
 
 typedef struct tlsf_block {
-  struct tlsf_block* prev_phys;
   size_t size;
 #ifdef DEBUG_OUTPUT
   uint32_t magic;
