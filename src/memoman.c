@@ -469,6 +469,8 @@ void mm_free_inst(mm_allocator_t* ctrl, void* ptr) {
       else ctrl->large_blocks = lb->next;
       if (lb->next) lb->next->prev = lb->prev;
       munmap(lb, lb->size);
+    } else {
+      fprintf(stderr, "[Memoman] Error: Pointer %p outside heap bounds in free()\n", ptr);
     }
     return;
   }
@@ -492,6 +494,99 @@ void mm_free_inst(mm_allocator_t* ctrl, void* ptr) {
   mm_check_integrity(ctrl);
 }
 
+void* mm_calloc_inst(mm_allocator_t* ctrl, size_t nmemb, size_t size) {
+  if (nmemb != 0 && size > SIZE_MAX / nmemb) return NULL;
+  size_t total = nmemb * size;
+  void* p = mm_malloc_inst(ctrl, total);
+  if (p) memset(p, 0, total);
+  return p;
+}
+
+/* 
+ * Helper for realloc logic.
+ * Returns:
+ *  0: Success (resized in place)
+ *  1: Needs move (valid pointer, but cannot resize in place)
+ * -1: Error (invalid pointer)
+ */
+static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
+  if (!ctrl) return -1;
+  mm_check_integrity(ctrl);
+
+  /* Handle Main Heap Blocks */
+  if ((char*)ptr >= ctrl->heap_start && (char*)ptr < ctrl->heap_end) {
+    if ((uintptr_t)ptr % ALIGNMENT != 0) return -1;
+
+    tlsf_block_t* block = user_to_block(ptr);
+    if (!block_check_magic(block)) return -1;
+
+    size_t current_size = block_size(block);
+    size_t aligned_size = align_size(size);
+    if (aligned_size < TLSF_MIN_BLOCK_SIZE) aligned_size = TLSF_MIN_BLOCK_SIZE;
+
+    /* Case 1: Shrink or Same Size */
+    if (aligned_size <= current_size) {
+      tlsf_block_t* remainder = split_block(ctrl, block, aligned_size);
+      if (remainder) insert_free_block(ctrl, remainder);
+      mm_check_integrity(ctrl);
+      return 0;
+    }
+
+    /* Case 2: Grow (Try to coalesce with next block) */
+    tlsf_block_t* next = block_next_safe(ctrl, block);
+    if (next && block_is_free(next)) {
+      size_t next_size = block_size(next);
+      size_t combined = current_size + BLOCK_HEADER_OVERHEAD + next_size;
+      
+      if (combined >= aligned_size) {
+        remove_free_block(ctrl, next);
+        block_set_size(block, combined);
+        
+        tlsf_block_t* next_next = block_next_safe(ctrl, block);
+        if (next_next) {
+          next_next->prev_phys = block;
+          block_set_prev_used(next_next);
+        }
+
+        tlsf_block_t* remainder = split_block(ctrl, block, aligned_size);
+        if (remainder) insert_free_block(ctrl, remainder);
+        mm_check_integrity(ctrl);
+        return 0;
+      }
+    }
+    return 1; /* Valid, but needs move */
+  } 
+  /* Handle Large Blocks */
+  else {
+    large_block_t* lb = find_large_block(ctrl, ptr);
+    if (!lb) return -1; /* Invalid pointer */
+    size_t current_size = lb->size - sizeof(large_block_t);
+    return (size <= current_size) ? 0 : 1;
+  }
+}
+
+void* mm_realloc_inst(mm_allocator_t* ctrl, void* ptr, size_t size) {
+  if (!ptr) return mm_malloc_inst(ctrl, size);
+  if (size == 0) { mm_free_inst(ctrl, ptr); return NULL; }
+
+  int status = try_realloc_inplace(ctrl, ptr, size);
+  
+  if (status == 0) return ptr; /* In-place success */
+  if (status == -1) {
+    fprintf(stderr, "[Memoman] Error: Invalid pointer in realloc()\n");
+    return NULL;
+  }
+
+  /* Status 1: Needs move */
+  void* new_ptr = mm_malloc_inst(ctrl, size);
+  if (new_ptr) {
+    size_t old_usable = mm_get_usable_size(ctrl, ptr);
+    memcpy(new_ptr, ptr, (old_usable < size) ? old_usable : size);
+    mm_free_inst(ctrl, ptr);
+  }
+  return new_ptr;
+}
+
 /* =========================== */
 /* === Usable Size Helpers === */
 /* =========================== */
@@ -513,17 +608,19 @@ size_t mm_malloc_usable_size(void* ptr) {
   return mm_get_usable_size(sys_allocator, ptr);
 }
 
-void mm_print_heap_stats(void) {
-  if (!sys_allocator) { printf("Allocator not initialized.\n"); return; }
-  printf("Heap: %p - %p (%zu bytes)\n", sys_allocator->heap_start, sys_allocator->heap_end, (size_t)(sys_allocator->heap_end - sys_allocator->heap_start));
+void mm_print_heap_stats_inst(mm_allocator_t* ctrl) {
+  if (!ctrl) { printf("Allocator instance is NULL.\n"); return; }
+  printf("Heap: %p - %p (%zu bytes)\n", ctrl->heap_start, ctrl->heap_end, (size_t)(ctrl->heap_end - ctrl->heap_start));
 }
 
-size_t mm_get_free_space(void) {
-  if (!sys_allocator) return 0;
+void mm_print_heap_stats(void) { mm_print_heap_stats_inst(sys_allocator); }
+
+size_t mm_get_free_space_inst(mm_allocator_t* ctrl) {
+  if (!ctrl) return 0;
   size_t free_space = 0;
   for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
     for (int sl = 0; sl < TLSF_SLI_COUNT; sl++) {
-      tlsf_block_t* block = sys_allocator->blocks[fl][sl];
+      tlsf_block_t* block = ctrl->blocks[fl][sl];
       while (block) {
         free_space += block_size(block);
         block = block->next_free;
@@ -533,21 +630,25 @@ size_t mm_get_free_space(void) {
   return free_space;
 }
 
-size_t mm_get_total_allocated(void) {
-  if (!sys_allocator) return 0;
-  size_t total_heap = (size_t)(sys_allocator->heap_end - sys_allocator->heap_start);
-  return total_heap - mm_get_free_space();
+size_t mm_get_free_space(void) { return mm_get_free_space_inst(sys_allocator); }
+
+size_t mm_get_total_allocated_inst(mm_allocator_t* ctrl) {
+  if (!ctrl) return 0;
+  size_t total_heap = (size_t)(ctrl->heap_end - ctrl->heap_start);
+  return total_heap - mm_get_free_space_inst(ctrl);
 }
 
-void mm_print_free_list(void) {
-  if (!sys_allocator) {
-    printf("Allocator not initialized.\n");
+size_t mm_get_total_allocated(void) { return mm_get_total_allocated_inst(sys_allocator); }
+
+void mm_print_free_list_inst(mm_allocator_t* ctrl) {
+  if (!ctrl) {
+    printf("Allocator instance is NULL.\n");
     return;
   }
   printf("\n=== Free List ===\n");
   for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
     for (int sl = 0; sl < TLSF_SLI_COUNT; sl++) {
-      tlsf_block_t* block = sys_allocator->blocks[fl][sl];
+      tlsf_block_t* block = ctrl->blocks[fl][sl];
       if (block) {
         printf("FL%d SL%d: ", fl, sl);
         while (block) {
@@ -560,6 +661,8 @@ void mm_print_free_list(void) {
   }
   printf("=================\n");
 }
+
+void mm_print_free_list(void) { mm_print_free_list_inst(sys_allocator); }
 
 void mm_reset_allocator(void) {
   mm_destroy();
@@ -648,11 +751,8 @@ void mm_destroy(void) {
 }
 
 void* mm_calloc(size_t nmemb, size_t size) {
-  if (nmemb != 0 && size > SIZE_MAX / nmemb) return NULL;
-  size_t total = nmemb * size;
-  void* p = mm_malloc(total);
-  if (p) memset(p, 0, total);
-  return p;
+  if (!sys_allocator) if (mm_init() != 0) return NULL;
+  return mm_calloc_inst(sys_allocator, nmemb, size);
 }
 
 void* mm_realloc(void*ptr, size_t size) {
@@ -660,68 +760,22 @@ void* mm_realloc(void*ptr, size_t size) {
   if (size == 0) { mm_free(ptr); return NULL; }
   
   if (!sys_allocator) return NULL;
-  mm_check_integrity(sys_allocator);
 
-  /* Handle Main Heap Blocks */
-  if ((char*)ptr >= sys_allocator->heap_start && (char*)ptr < sys_allocator->heap_end) {
-    if ((uintptr_t)ptr % ALIGNMENT != 0) return NULL;
-
-    tlsf_block_t* block = user_to_block(ptr);
-    if (!block_check_magic(block)) return NULL;
-
-    size_t current_size = block_size(block);
-    size_t aligned_size = align_size(size);
-    if (aligned_size < TLSF_MIN_BLOCK_SIZE) aligned_size = TLSF_MIN_BLOCK_SIZE;
-
-    /* Case 1: Shrink or Same Size */
-    if (aligned_size <= current_size) {
-      tlsf_block_t* remainder = split_block(sys_allocator, block, aligned_size);
-      if (remainder) insert_free_block(sys_allocator, remainder);
-      mm_check_integrity(sys_allocator);
-      return ptr;
-    }
-
-    /* Case 2: Grow (Try to coalesce with next block) */
-    tlsf_block_t* next = block_next_safe(sys_allocator, block);
-    if (next && block_is_free(next)) {
-      size_t next_size = block_size(next);
-      size_t combined = current_size + BLOCK_HEADER_OVERHEAD + next_size;
-      
-      if (combined >= aligned_size) {
-        remove_free_block(sys_allocator, next);
-        block_set_size(block, combined);
-        
-        tlsf_block_t* next_next = block_next_safe(sys_allocator, block);
-        if (next_next) {
-          next_next->prev_phys = block;
-          block_set_prev_used(next_next);
-        }
-
-        tlsf_block_t* remainder = split_block(sys_allocator, block, aligned_size);
-        if (remainder) insert_free_block(sys_allocator, remainder);
-        mm_check_integrity(sys_allocator);
-        return ptr;
-      }
-    }
-  } 
-  /* Handle Large Blocks */
-  else {
-    large_block_t* lb = find_large_block(sys_allocator, ptr);
-    if (lb) {
-      size_t current_size = lb->size - sizeof(large_block_t);
-      if (size <= current_size) return ptr; /* Shrink in place (waste space but valid) */
-      /* Fallthrough to malloc/copy/free for grow */
-    } else {
-      return NULL; /* Invalid pointer */
-    }
+  int status = try_realloc_inplace(sys_allocator, ptr, size);
+  
+  if (status == 0) return ptr; /* In-place success */
+  if (status == -1) {
+    fprintf(stderr, "[Memoman] Error: Invalid pointer in realloc()\n");
+    return NULL;
   }
 
   /* Fallback: Allocate new, copy, free old */
+  /* We use mm_malloc (global) here to support heap growth if needed */
   void* new_ptr = mm_malloc(size);
   if (new_ptr) {
-    size_t old_usable = mm_malloc_usable_size(ptr);
+    size_t old_usable = mm_get_usable_size(sys_allocator, ptr);
     memcpy(new_ptr, ptr, (old_usable < size) ? old_usable : size);
-    mm_free(ptr);
+    mm_free_inst(sys_allocator, ptr);
   }
   return new_ptr;
 }

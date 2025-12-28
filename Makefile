@@ -1,5 +1,6 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -g -DDEBUG_OUTPUT -Isrc
+BASE_FLAGS = -Wall -Wextra -std=c99 -Isrc
+CFLAGS = $(BASE_FLAGS) -g -DDEBUG_OUTPUT
 SRC = src/memoman.c
 TEST_DIR = tests
 BIN_DIR = tests/bin
@@ -7,7 +8,7 @@ BIN_DIR = tests/bin
 TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)
 TEST_BINS = $(patsubst $(TEST_DIR)/%.c, $(BIN_DIR)/%, $(TEST_SRCS))
 
-.PHONY: all clean debug run
+.PHONY: all clean debug benchmark run
 
 all: $(TEST_BINS)
 	@echo "Built with debug output enabled"
@@ -22,7 +23,11 @@ clean:
 
 debug: all
 
-run: all
+benchmark: CFLAGS = $(BASE_FLAGS) -O3 -DNDEBUG
+benchmark: clean $(TEST_BINS)
+	@echo "Built with optimizations for benchmarking"
+
+run: $(TEST_BINS)
 	@echo "=== Running All Tests ==="
 	@failed=0; \
 	for test in $(TEST_BINS); do \

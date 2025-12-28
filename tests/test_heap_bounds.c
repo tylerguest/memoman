@@ -10,29 +10,34 @@ static int test_free_null(void) {
 }
 
 static int test_free_stack(void) {
+  printf("  (Expect error message below) -> ");
   char stack_var = 'x';
   mm_free(&stack_var);
   return 1;
 }
 
 static int test_free_invalid(void) {
+  printf("  (Expect error message below) -> ");
   mm_free((void*)(uintptr_t)0xDEADBEEF);
   return 1;
 }
 
 static int test_free_before_heap(void) {
+  printf("  (Expect error message below) -> ");
   void* before_heap = (void*)(sys_allocator->heap_start - 100);
   mm_free(before_heap);
   return 1;
 }
 
 static int test_free_after_heap(void) {
+  printf("  (Expect error message below) -> ");
   void* after_heap = (void*)(sys_allocator->heap_end + 100);
   mm_free(after_heap);
   return 1;
 }
 
 static int test_free_heap_end(void) {
+  printf("  (Expect error message below) -> ");
   mm_free((void*)sys_allocator->heap_end);
   return 1;
 }
@@ -41,6 +46,7 @@ static int test_misaligned_free(void) {
   void* valid = mm_malloc(128);
   ASSERT_NOT_NULL(valid);
   void* misaligned = (char*)valid + 3;
+  printf("  (Expect error message below) -> ");
   mm_free(misaligned); /* Should ignore */
   mm_free(valid);
   return 1;
@@ -49,6 +55,7 @@ static int test_misaligned_free(void) {
 static int test_large_block_invalid_free(void) {
   void* large = mm_malloc(2 * 1024 * 1024);
   ASSERT_NOT_NULL(large);
+  printf("  (Expect error message below) -> ");
   mm_free((char*)large + 100); /* Invalid */
   mm_free(large);
   return 1;

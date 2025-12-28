@@ -121,6 +121,7 @@ static int test_corrupt_coalescing() {
   return 1;
 }
 
+#ifdef DEBUG_OUTPUT
 static int test_corrupt_magic() {
   TEST_RESET();
   void* p = mm_malloc(64);
@@ -172,6 +173,7 @@ static int test_free_safety_check() {
   
   return 1;
 }
+#endif
 
 int main() {
   TEST_SUITE_BEGIN("Validation API");
@@ -180,8 +182,10 @@ int main() {
   RUN_TEST(test_corrupt_overflow);
   RUN_TEST(test_corrupt_free_list);
   RUN_TEST(test_corrupt_coalescing);
+#ifdef DEBUG_OUTPUT
   RUN_TEST(test_corrupt_magic);
   RUN_TEST(test_free_safety_check);
+#endif
   TEST_SUITE_END();
   TEST_MAIN_END();
 }

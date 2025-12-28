@@ -66,12 +66,40 @@ extern size_t sys_heap_cap;
 /* ===================== */
 /* === Instsance API === */
 /* ===================== */
+/* ====================================================================================
+ *                                 INSTANCE API (Pool-based)
+ * ====================================================================================
+ * Explicit Ownership Model:
+ * - The caller provides the memory block (pool).
+ * - The allocator manages the internal structure of that pool.
+ * - The caller is responsible for freeing the pool memory after destroying the instance.
+ */
 
+/* Initialize a new allocator instance inside the provided memory block.
+ * Returns NULL if the memory block is too small (< ~8KB). */
 mm_allocator_t* mm_create(void* mem, size_t bytes);
+
+/* Destroy an allocator instance.
+ * - Releases any external resources (like mmap'd large blocks).
+ * - Does NOT free the initial memory pool (caller owns it). */
 void mm_destroy_instance(mm_allocator_t* allocator);
+
+/* Allocate/Free from a specific instance */
 void* mm_malloc_inst(mm_allocator_t* allocator, size_t size);
 void mm_free_inst(mm_allocator_t* allocator, void* ptr);
+void* mm_calloc_inst(mm_allocator_t* allocator, size_t nmemb, size_t size);
+void* mm_realloc_inst(mm_allocator_t* allocator, void* ptr, size_t size);
+
+/* Get usable size for a pointer within a specific instance */
 size_t mm_get_usable_size(mm_allocator_t* allocator, void* ptr);
+
+/* Instance Statistics */
+size_t mm_get_free_space_inst(mm_allocator_t* allocator);
+size_t mm_get_total_allocated_inst(mm_allocator_t* allocator);
+void mm_print_heap_stats_inst(mm_allocator_t* allocator);
+void mm_print_free_list_inst(mm_allocator_t* allocator);
+
+/* Internal helpers */
 void mm_get_mapping_indices(size_t size, int* fl, int* sl);
 int mm_validate_inst(mm_allocator_t* allocator);
 
