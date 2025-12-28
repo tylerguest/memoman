@@ -111,7 +111,13 @@ static inline int block_check_magic(tlsf_block_t* block) {
 #endif
 }
 
-static inline tlsf_block_t* block_prev(tlsf_block_t* block) { return block->prev_phys; }
+static inline tlsf_block_t* block_prev(tlsf_block_t* block) { 
+  return block->prev_phys; 
+}
+
+static inline void block_set_prev(tlsf_block_t* block, tlsf_block_t* prev) { 
+  block->prev_phys = prev; 
+}
 
 static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* block) {
   tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + block_size(block));
@@ -122,7 +128,10 @@ static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* 
 static inline void block_mark_as_free(mm_allocator_t* ctrl, tlsf_block_t* block) {
   block_set_free(block);
   tlsf_block_t* next = block_next_safe(ctrl, block);
-  if (next) block_set_prev_free(next);
+  if (next) {
+    block_set_prev_free(next);
+    block_set_prev(next, block);
+  }
 }
 
 /* ================================== */
@@ -200,13 +209,13 @@ static inline tlsf_block_t* split_block(mm_allocator_t* ctrl, tlsf_block_t* bloc
   block_set_magic(remainder);
   block_set_size(remainder, remainder_size);
   block_set_free(remainder);
-  remainder->prev_phys = block;
 
+  block_set_prev(remainder, block);
   block_set_prev_used(remainder);
 
   tlsf_block_t* next = block_next_safe(ctrl, remainder);
   if (next) {
-    next->prev_phys = remainder;
+    block_set_prev(next, remainder);
     block_set_prev_free(next);
   }
   return remainder;
@@ -221,7 +230,7 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
       block_set_size(prev, combined);
 
       tlsf_block_t* next = block_next_safe(ctrl, prev);
-      if (next) next->prev_phys = prev;
+      if (next) block_set_prev(next, prev);
 
       block = prev;
     }
@@ -234,7 +243,7 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
     block_set_size(block, combined);
 
     tlsf_block_t* next_next = block_next_safe(ctrl, block);
-    if (next_next) next_next->prev_phys = block;
+    if (next_next) block_set_prev(next_next, block);
   }
 
   return block;
@@ -253,6 +262,13 @@ static void create_free_block(mm_allocator_t* ctrl, void* start, size_t size) {
   insert_free_block(ctrl, block);
 }
 
+/* Helper to ensure block stride maintains alignment */
+static inline size_t align_tlsf_size(size_t size) {
+  size_t total = size + BLOCK_HEADER_OVERHEAD;
+  size_t aligned_total = (total + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+  return aligned_total - BLOCK_HEADER_OVERHEAD;
+}
+
 /* =========================== */
 /* === Public Instance API === */
 /* =========================== */
@@ -269,7 +285,10 @@ int mm_validate_inst(mm_allocator_t* ctrl) {
 
   while (curr && (char*)curr < ctrl->heap_end) {
     /* Check Alignment & Bounds */
-    CHECK(((uintptr_t)curr % ALIGNMENT == 0), "Block not aligned");
+    CHECK(((uintptr_t)curr % ALIGNMENT == 0), "Block header not aligned");
+    if ((char*)curr != ctrl->heap_start) {
+        CHECK(((uintptr_t)block_to_user(curr) % ALIGNMENT == 0), "Block payload not aligned");
+    }
     CHECK((char*)curr >= ctrl->heap_start && (char*)curr < ctrl->heap_end, "Block out of bounds");
     #ifdef DEBUG_OUTPUT
     CHECK(curr->magic == TLSF_BLOCK_MAGIC, "Block magic corrupted");
@@ -286,7 +305,7 @@ int mm_validate_inst(mm_allocator_t* ctrl) {
 
       if (is_prev_free) {
         /* Ghost pointer must point to prev */
-        CHECK(curr->prev_phys == prev, "Ghost prev_phys pointer invalid");
+        CHECK(block_prev(curr) == prev, "Ghost prev_phys pointer invalid");
         /* Coalescing Invariant: No two free blocks adjacent */
         CHECK(!is_free, "Adjacent free blocks detected (coalescing failed)");
       }
@@ -398,10 +417,10 @@ mm_allocator_t* mm_create(void* mem, size_t bytes) {
   size_t middle_size = (char*)epilogue - middle_start;
   
   tlsf_block_t* block = (tlsf_block_t*)middle_start;
-  block->prev_phys = prologue;
   block->size = 0; /* Initialize flags */
   block_set_prev_used(block); /* Prologue is used */
-  epilogue->prev_phys = block;
+  block_set_prev(block, prologue);
+  block_set_prev(epilogue, block);
   
   create_free_block(allocator, middle_start, middle_size);
 
@@ -439,8 +458,8 @@ void* mm_malloc_inst(mm_allocator_t* ctrl, size_t size) {
     return (char*)ptr + sizeof(large_block_t);
   }
 
-  size = align_size(size);
   if (size < TLSF_MIN_BLOCK_SIZE) size = TLSF_MIN_BLOCK_SIZE;
+  size = align_tlsf_size(size);
 
   int fl, sl;
   tlsf_block_t* block = search_suitable_block(ctrl, size, &fl, &sl);
@@ -521,8 +540,8 @@ static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
     if (!block_check_magic(block)) return -1;
 
     size_t current_size = block_size(block);
-    size_t aligned_size = align_size(size);
-    if (aligned_size < TLSF_MIN_BLOCK_SIZE) aligned_size = TLSF_MIN_BLOCK_SIZE;
+    if (size < TLSF_MIN_BLOCK_SIZE) size = TLSF_MIN_BLOCK_SIZE;
+    size_t aligned_size = align_tlsf_size(size);
 
     /* Case 1: Shrink or Same Size */
     if (aligned_size <= current_size) {
@@ -544,7 +563,7 @@ static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
         
         tlsf_block_t* next_next = block_next_safe(ctrl, block);
         if (next_next) {
-          next_next->prev_phys = block;
+          block_set_prev(next_next, block);
           block_set_prev_used(next_next);
         }
 
@@ -682,7 +701,7 @@ static int global_grow_heap(size_t min_additional) {
   if (new_cap > MAX_HEAP_SIZE) new_cap = MAX_HEAP_SIZE;
   if (new_cap <= old_cap) return -1;
 
-  if (mprotect(sys_heap_base, new_cap, PROT_READ | PROT_WRITE) != 0) return -1;
+  if (mprotect(sys_heap_base, new_cap, PROT_READ | PROT_WRITE) != 0) { perror("mprotect failed"); return -1; }
 
   /* Handle Epilogue Movement */
   tlsf_block_t* old_epilogue = (tlsf_block_t*)(sys_heap_base + old_cap - BLOCK_HEADER_OVERHEAD);
@@ -706,7 +725,7 @@ static int global_grow_heap(size_t min_additional) {
   
   /* Preserve the PREV_FREE state of the old epilogue! */
   block->size = old_prev_flags; 
-  new_epilogue->prev_phys = block;
+  block_set_prev(new_epilogue, block);
 
   create_free_block(sys_allocator, block, total_new_size);
   return 0;

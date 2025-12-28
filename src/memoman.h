@@ -32,8 +32,10 @@
 typedef struct tlsf_block {
   struct tlsf_block* prev_phys;
   size_t size;
+#ifdef DEBUG_OUTPUT
   uint32_t magic;
   char pad[12];
+#endif
   struct tlsf_block* next_free;
   struct tlsf_block* prev_free;
 } tlsf_block_t;
@@ -46,9 +48,9 @@ typedef struct large_block {
 } large_block_t;
 
 typedef struct mm_allocator {
-  tlsf_block_t* blocks[TLSF_FLI_MAX][TLSF_SLI_COUNT];
   uint32_t fl_bitmap;
   uint32_t sl_bitmap[TLSF_FLI_MAX];
+  tlsf_block_t* blocks[TLSF_FLI_MAX][TLSF_SLI_COUNT];
   char* heap_start;
   char* heap_end;
   large_block_t* large_blocks;
@@ -63,9 +65,6 @@ extern mm_allocator_t* sys_allocator;
 extern char* sys_heap_base;
 extern size_t sys_heap_cap;
 
-/* ===================== */
-/* === Instsance API === */
-/* ===================== */
 /* ====================================================================================
  *                                 INSTANCE API (Pool-based)
  * ====================================================================================

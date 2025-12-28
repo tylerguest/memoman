@@ -9,6 +9,10 @@ static inline tlsf_block_t* user_to_block_helper(void* ptr) {
   return (tlsf_block_t*)((char*)ptr - offsetof(tlsf_block_t, next_free));
 }
 
+static tlsf_block_t* get_prev_phys(tlsf_block_t* b) {
+  return b->prev_phys;
+}
+
 static int test_sentinel_linkage(void) {
   TEST_RESET();
 
@@ -16,16 +20,15 @@ static int test_sentinel_linkage(void) {
   ASSERT_NOT_NULL(ptr);
 
   tlsf_block_t* block = user_to_block_helper(ptr);
-  tlsf_block_t* prev = block->prev_phys;
 
+  /* The first block must have PREV_USED set (Prologue is used) */
+  ASSERT_EQ(block->size & TLSF_PREV_FREE, 0);
+
+  tlsf_block_t* prev = get_prev_phys(block);
   /* The previous physical block must be the Prologue */
-  /* Prologue is at heap_start */
   ASSERT_EQ(prev, (tlsf_block_t*)sys_allocator->heap_start);
-
-  /* Prologue must be used and size 0 */
   ASSERT_EQ(prev->size & TLSF_SIZE_MASK, 0);
   ASSERT_EQ(prev->size & TLSF_BLOCK_FREE, 0);
-
   mm_free(ptr);
   return 1;
 }

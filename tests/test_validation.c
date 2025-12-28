@@ -39,6 +39,7 @@ static int test_corrupt_alignment() {
   b->size += 4;
 
   printf("  (Expect error message below) -> ");
+  fflush(stdout);
   int result = mm_validate();
 
   b->size = original_size;
@@ -58,6 +59,7 @@ static int test_corrupt_overflow() {
   b->size = (1024 * 1024 * 2) | (original_size & 3);
 
   printf("  (Expect error message below) -> ");
+  fflush(stdout);
   int result = mm_validate();
 
   b->size = original_size;
@@ -84,6 +86,7 @@ static int test_corrupt_free_list() {
   sys_allocator->sl_bitmap[fl] &= ~(1U << sl);
   
   printf("  (Expect error message below) -> ");
+  fflush(stdout);
   int result = mm_validate();
 
   /* Restore bit */
@@ -110,6 +113,7 @@ static int test_corrupt_coalescing() {
   b2->size &= ~TLSF_PREV_FREE;
 
   printf("  (Expect error message below) -> ");
+  fflush(stdout);
   int result = mm_validate();
 
   /* Restore flag */
@@ -134,6 +138,7 @@ static int test_corrupt_magic() {
   b->magic = 0xDEADBEEF;
 
   printf("  (Expect error message below) -> ");
+  fflush(stdout);
   int result = mm_validate();
 
   /* Restore */
@@ -158,6 +163,7 @@ static int test_free_safety_check() {
   size_t free_space_before = mm_get_free_space();
   
   printf("  (Expect error message below) -> ");
+  fflush(stdout);
   mm_free(p);
   
   size_t free_space_after = mm_get_free_space();

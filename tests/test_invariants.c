@@ -5,6 +5,8 @@
 /* Helper to acccess internal block structure */
 static tlsf_block_t* get_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_HEADER_OVERHEAD); }
 
+static tlsf_block_t* get_prev_phys(tlsf_block_t* b) { return b->prev_phys; }
+
 static int test_coalescing_invariants() {
   TEST_RESET();
 
@@ -30,7 +32,7 @@ static int test_coalescing_invariants() {
   /* Check ghost pointer invariant: b3 should now have PREV_FREE set */
   ASSERT(b3->size & TLSF_PREV_FREE);
   /* And b3->prev_phys should point to b2 (Ghost Pointer Active) */
-  ASSERT(b3->prev_phys == b2);
+  ASSERT(get_prev_phys(b3) == b2);
 
   /* Free left - should coalesce with b2 (Right Coalesce) */
   mm_free(p1);
@@ -39,7 +41,7 @@ static int test_coalescing_invariants() {
 
   /* b3 should still point to the free block on its left. */
   /* Since b1 and b2 coalesced, b3->prev_phys should now be b1 */
-  ASSERT(b3->prev_phys == b1);
+  ASSERT(get_prev_phys(b3) == b1);
 
   mm_free(p3);
   return 1;
@@ -67,7 +69,7 @@ static int test_ghost_pointer_safety() {
   mm_free(p1);
 
   ASSERT(b2->size & TLSF_PREV_FREE);
-  ASSERT(b2->prev_phys == get_block(p1));
+  ASSERT(get_prev_phys(b2) == get_block(p1));
 
   mm_free(p2);
   return 1;

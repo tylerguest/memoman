@@ -37,7 +37,7 @@ run: $(TEST_BINS)
 		if [ $$exit_code -eq 0 ]; then \
 			echo "PASSED: $$name"; \
 		else \
-			echo "FAILED: $$name"; \
+			echo "FAILED: $$name (Exit code: $$exit_code)"; \
 			echo "$$output" | sed 's/^/  /'; \
 			failed=$$((failed + 1)); \
 		fi; \

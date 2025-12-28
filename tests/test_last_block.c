@@ -26,7 +26,7 @@ int main() {
 
   /* Test 2: Epilogue exists */
   printf("  Test 2: Epilogue sentinel... ");
-  tlsf_block_t* epilogue = (tlsf_block_t*)(sys_allocator->heap_end - sizeof(tlsf_block_t));
+  tlsf_block_t* epilogue = (tlsf_block_t*)(sys_allocator->heap_end - BLOCK_HEADER_OVERHEAD);
   assert(get_block_size(epilogue) == 0);
   assert(is_block_used(epilogue));
   printf("PASSED\n");
@@ -40,8 +40,8 @@ int main() {
     if (!mm_malloc(10000)) break; 
   }
   
-  assert(sys_allocator->heap_end > old_end);
-  tlsf_block_t* new_epilogue = (tlsf_block_t*)(sys_allocator->heap_end - sizeof(tlsf_block_t));
+  assert(sys_allocator->heap_end > old_end); // Ensure heap actually grew
+  tlsf_block_t* new_epilogue = (tlsf_block_t*)(sys_allocator->heap_end - BLOCK_HEADER_OVERHEAD);
   assert(get_block_size(new_epilogue) == 0);
   assert(is_block_used(new_epilogue));
   printf("PASSED\n");
