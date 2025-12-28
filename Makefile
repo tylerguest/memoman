@@ -4,9 +4,6 @@ LDFLAGS =
 DEBUG_FLAGS = -g -DDEBUG_OUTPUT
 BENCHMARK_FLAGS = -O3 -march=native -DNDEBUG
 
-# Ensure output directory exists before anything else
-$(shell mkdir -p tests/bin)
-
 # Auto-detect all test files
 TEST_SOURCES = $(wildcard tests/test*.c)
 # Convert .c filenames to bin filenames for the target list
@@ -19,11 +16,13 @@ all: $(TESTS)
 # 1. Matches ONLY test_mapping_unit
 # 2. Depends on memoman.c (so edits trigger rebuild) but does NOT link it (to avoid double definition)
 tests/bin/test_mapping_unit: tests/test_mapping_unit.c src/memoman.c src/memoman.h
+	@mkdir -p tests/bin
 	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/memoman.c tests/test_mapping_unit.c
 
 # --- GENERIC RULE: Black-Box Testing ---
 # Matches all other tests and links memoman.c normally
 tests/bin/%: tests/%.c src/memoman.c src/memoman.h
+	@mkdir -p tests/bin
 	$(CC) $(CFLAGS) $(LDFLAGS) -Isrc -o $@ src/memoman.c $<
 
 benchmark: clean

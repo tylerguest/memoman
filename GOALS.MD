@@ -106,7 +106,7 @@ Enforce:
 
 #### Exit Criteria
 
-- [ ] `MM_DEBUG` build catches intentional corruption quickly
+- [x] `MM_DEBUG` build catches intentional corruption quickly
 
 ---
 
