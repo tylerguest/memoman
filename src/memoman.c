@@ -83,8 +83,8 @@ static inline int find_suitable_sl(mm_allocator_t* ctrl, int fl, int sl) {
 /* =============================== */
 
 static inline size_t block_size(tlsf_block_t* block) { return block->size & TLSF_SIZE_MASK; }
-static inline int block_is_free(tlsf_block_t* block) { return block->size & TLSF_BLOCK_FREE; }
-static inline int block_is_prev_free(tlsf_block_t* block) { return block->size & TLSF_PREV_FREE; }
+static inline int block_is_free(tlsf_block_t* block) { return (block->size & TLSF_BLOCK_FREE) != 0; }
+static inline int block_is_prev_free(tlsf_block_t* block) { return (block->size & TLSF_PREV_FREE) != 0; }
 static inline void block_set_size(tlsf_block_t* block, size_t size) {
   size_t flags = block->size & ~TLSF_SIZE_MASK;
   block->size = size | flags;
@@ -238,18 +238,20 @@ static void create_free_block(mm_allocator_t* ctrl, void* start, size_t size) {
 /* === Public Instance API === */
 /* =========================== */
 
-#ifdef MM_DEBUG
-static void mm_check_integrity(mm_allocator_t* ctrl) {
-  if (!ctrl) return;
+int mm_validate_inst(mm_allocator_t* ctrl) {
+  if (!ctrl) return 0;
+
+  #define CHECK(cond, msg) do { if (!(cond)) { fprintf(stderr, "[Memoman] Integrity Failure: %s\n", msg); return 0; } } while(0)
 
   /* 1. Physical Heap Walk */
   tlsf_block_t* prev = NULL;
   tlsf_block_t* curr = (tlsf_block_t*)ctrl->heap_start;
+  int found_epilogue = 0;
 
   while (curr && (char*)curr < ctrl->heap_end) {
     /* Check Alignment & Bounds */
-    assert(((uintptr_t)curr % ALIGNMENT == 0) && "Block not aligned");
-    assert((char*)curr >= ctrl->heap_start && (char*)curr < ctrl->heap_end && "Block out of bounds");
+    CHECK(((uintptr_t)curr % ALIGNMENT == 0), "Block not aligned");
+    CHECK((char*)curr >= ctrl->heap_start && (char*)curr < ctrl->heap_end, "Block out of bounds");
 
     size_t size = block_size(curr);
     int is_free = block_is_free(curr);
@@ -258,22 +260,23 @@ static void mm_check_integrity(mm_allocator_t* ctrl) {
     /* Check Ghost Pointer / Prev Free Flag Consistency */
     if (prev) {
       int prev_actual_free = block_is_free(prev);
-      assert(is_prev_free == prev_actual_free && "PREV_FREE flag desync with actual prev block");
+      CHECK(is_prev_free == prev_actual_free, "PREV_FREE flag desync with actual prev block");
 
       if (is_prev_free) {
         /* Ghost pointer must point to prev */
-        assert(curr->prev_phys == prev && "Ghost prev_phys pointer invalid");
+        CHECK(curr->prev_phys == prev, "Ghost prev_phys pointer invalid");
         /* Coalescing Invariant: No two free blocks adjacent */
-        assert(!is_free && "Adjacent free blocks detected (coalescing failed)");
+        CHECK(!is_free, "Adjacent free blocks detected (coalescing failed)");
       }
     }
 
     /* Sentinel Checks */
     if (size == 0) {
-      if ((char*)curr == ctrl->heap_start) assert(!is_free && "Prologue must be used");
+      if ((char*)curr == ctrl->heap_start) CHECK(!is_free, "Prologue must be used");
       else {
-        assert(!is_free && "Epilogue must be used");
-        assert((char*)curr + BLOCK_HEADER_OVERHEAD == ctrl->heap_end && "Epilogue not at heap end");
+        CHECK(!is_free, "Epilogue must be used");
+        CHECK((char*)curr + BLOCK_HEADER_OVERHEAD == ctrl->heap_end, "Epilogue not at heap end");
+        found_epilogue = 1;
         break; 
       }
     }
@@ -281,6 +284,7 @@ static void mm_check_integrity(mm_allocator_t* ctrl) {
     prev = curr;
     curr = block_next_safe(ctrl, curr);
   }
+  CHECK(found_epilogue, "Heap walk finished without finding epilogue");
 
   /* 2. Logical Free List Walk */
   for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
@@ -289,9 +293,9 @@ static void mm_check_integrity(mm_allocator_t* ctrl) {
       
       /* Bitmap Consistency */
       int has_bit = (ctrl->sl_bitmap[fl] & (1U << sl)) != 0;
-      if (block) assert(has_bit && "Bitmap cleared but list not empty");
+      if (block) CHECK(has_bit, "Bitmap cleared but list not empty");
       else {
-        assert(!has_bit && "Bitmap set but list empty");
+        CHECK(!has_bit, "Bitmap set but list empty");
         continue;
       }
 
@@ -300,20 +304,27 @@ static void mm_check_integrity(mm_allocator_t* ctrl) {
       int count = 0;
       
       while (walk) {
-        assert(count++ < 10000 && "Infinite loop detected in free list");
-        assert(block_is_free(walk) && "Used block found in free list");
-        assert(walk->prev_free == list_prev && "Free list prev pointer broken");
+        CHECK(count++ < 10000, "Infinite loop detected in free list");
+        CHECK(block_is_free(walk), "Used block found in free list");
+        CHECK(walk->prev_free == list_prev, "Free list prev pointer broken");
         
         /* Size Mapping Check */
         int mapped_fl, mapped_sl;
         mapping(block_size(walk), &mapped_fl, &mapped_sl);
-        assert(mapped_fl == fl && mapped_sl == sl && "Block in wrong free list bucket");
+        CHECK(mapped_fl == fl && mapped_sl == sl, "Block in wrong free list bucket");
 
         list_prev = walk;
         walk = walk->next_free;
       }
     }
   }
+  #undef CHECK
+  return 1;
+}
+
+#ifdef MM_DEBUG
+static void mm_check_integrity(mm_allocator_t* ctrl) {
+  assert(mm_validate_inst(ctrl) && "Heap integrity check failed");
 }
 #else
 #define mm_check_integrity(ctrl) ((void)0)
@@ -676,4 +687,9 @@ void* mm_realloc(void*ptr, size_t size) {
     mm_free(ptr);
   }
   return new_ptr;
+}
+
+int mm_validate(void) {
+  if (!sys_allocator) return 1;
+  return mm_validate_inst(sys_allocator);
 }

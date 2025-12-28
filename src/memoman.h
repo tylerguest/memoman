@@ -70,6 +70,7 @@ void* mm_malloc_inst(mm_allocator_t* allocator, size_t size);
 void mm_free_inst(mm_allocator_t* allocator, void* ptr);
 size_t mm_get_usable_size(mm_allocator_t* allocator, void* ptr);
 void mm_get_mapping_indices(size_t size, int* fl, int* sl);
+int mm_validate_inst(mm_allocator_t* allocator);
 
 /* ========================== */
 /* === Global Wrapper API === */
@@ -87,5 +88,6 @@ size_t mm_get_free_space(void);
 size_t mm_get_total_allocated(void);
 void mm_print_free_list(void);
 void mm_reset_allocator(void);
+int mm_validate(void);
 
 #endif 
