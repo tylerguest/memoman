@@ -30,15 +30,11 @@ static int test_add_pool_initial_links(void) {
   size_t aligned_bytes = pool_bytes - (aligned_addr - start_addr);
   char* pool_end = pool_start + aligned_bytes;
 
-  tlsf_block_t* prologue = (tlsf_block_t*)pool_start;
-  ASSERT_EQ((prologue->size & TLSF_SIZE_MASK), 0);
-  ASSERT_EQ((prologue->size & TLSF_BLOCK_FREE), 0);
-
-  tlsf_block_t* first = (tlsf_block_t*)(pool_start + BLOCK_START_OFFSET);
+  tlsf_block_t* first = (tlsf_block_t*)pool_start;
   ASSERT(first->size & TLSF_BLOCK_FREE);
   ASSERT(!(first->size & TLSF_PREV_FREE));
 
-  tlsf_block_t* epilogue = (tlsf_block_t*)(pool_end - BLOCK_START_OFFSET);
+  tlsf_block_t* epilogue = (tlsf_block_t*)(pool_end - BLOCK_HEADER_OVERHEAD);
   ASSERT_EQ((epilogue->size & TLSF_SIZE_MASK), 0);
   ASSERT_EQ((epilogue->size & TLSF_BLOCK_FREE), 0);
   ASSERT(epilogue->size & TLSF_PREV_FREE);

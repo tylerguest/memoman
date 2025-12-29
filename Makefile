@@ -2,6 +2,7 @@ CC = gcc
 BASE_FLAGS = -Wall -Wextra -std=c99 -Isrc
 CFLAGS = $(BASE_FLAGS) -g -DDEBUG_OUTPUT
 SRC = src/memoman.c
+TLSF_SRC = examples/TLSF/matt_conte/tlsf.c
 TEST_DIR = tests
 BIN_DIR = tests/bin
 
@@ -16,6 +17,10 @@ all: $(TEST_BINS)
 $(BIN_DIR)/%: $(TEST_DIR)/%.c $(SRC)
 	@mkdir -p $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ $(SRC) $<
+
+$(BIN_DIR)/test_parity_conte: $(TEST_DIR)/test_parity_conte.c $(SRC) $(TLSF_SRC)
+	@mkdir -p $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $(SRC) $(TLSF_SRC) $<
 
 clean:
 	rm -f $(BIN_DIR)/*

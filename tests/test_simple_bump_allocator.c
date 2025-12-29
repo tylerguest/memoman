@@ -1,12 +1,11 @@
 #include "test_framework.h"
-#include "../src/memoman.h"
 
 static int test_bump_basic(void) {
   char* ptr1 = (char*)mm_malloc(10);
-  char* ptr2 = (char*)mm_malloc(20);  
+  char* ptr2 = (char*)mm_malloc(20);
   ASSERT_NOT_NULL(ptr1);
   ASSERT_NOT_NULL(ptr2);
-  mm_free(ptr1);  
+  mm_free(ptr1);
   return 1;
 }
 
@@ -16,3 +15,4 @@ int main(void) {
   TEST_SUITE_END();
   TEST_MAIN_END();
 }
+

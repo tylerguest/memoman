@@ -42,7 +42,11 @@ typedef struct tlsf_block_t {
 /* TLSF-style mapping configuration (defaults match TLSF 3.1). */
 #define SL_INDEX_COUNT_LOG2 5
 #define SL_INDEX_COUNT (1 << SL_INDEX_COUNT_LOG2)
+#if UINTPTR_MAX > 0xffffffffu
 #define FL_INDEX_MAX 32
+#else
+#define FL_INDEX_MAX 30
+#endif
 #define MM_ALIGN_SHIFT \
   ((ALIGNMENT == 1) ? 0 : (ALIGNMENT == 2) ? 1 : (ALIGNMENT == 4) ? 2 : \
    (ALIGNMENT == 8) ? 3 : (ALIGNMENT == 16) ? 4 : (ALIGNMENT == 32) ? 5 : -1)
@@ -67,6 +71,6 @@ struct mm_allocator_t {
 
 /* Test-only helper exposed by the implementation. */
 void mm_get_mapping_indices(size_t size, int* fl, int* sl);
+void mm_get_mapping_search_indices(size_t size, int* fl, int* sl);
 
 #endif
-

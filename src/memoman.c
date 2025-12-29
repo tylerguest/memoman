@@ -57,12 +57,18 @@ typedef struct tlsf_block_t {
 /* TLSF-style mapping configuration (defaults match TLSF 3.1). */
 #define SL_INDEX_COUNT_LOG2 5
 #define SL_INDEX_COUNT (1 << SL_INDEX_COUNT_LOG2)
+#if UINTPTR_MAX > 0xffffffffu
 #define FL_INDEX_MAX 32
+#else
+#define FL_INDEX_MAX 30
+#endif
 #define MM_ALIGN_SHIFT \
   ((ALIGNMENT == 1) ? 0 : (ALIGNMENT == 2) ? 1 : (ALIGNMENT == 4) ? 2 : \
    (ALIGNMENT == 8) ? 3 : (ALIGNMENT == 16) ? 4 : (ALIGNMENT == 32) ? 5 : -1)
 #define FL_INDEX_SHIFT (SL_INDEX_COUNT_LOG2 + MM_ALIGN_SHIFT)
 #define FL_INDEX_COUNT (FL_INDEX_MAX - FL_INDEX_SHIFT + 1)
+static const size_t SMALL_BLOCK_SIZE = (size_t)1 << FL_INDEX_SHIFT;
+static const size_t BLOCK_SIZE_MAX = (size_t)1 << FL_INDEX_MAX;
 
 /* Aliases for compatibility with TLSF naming. */
 #define TLSF_SLI          SL_INDEX_COUNT_LOG2
@@ -97,10 +103,23 @@ static inline size_t align_size(size_t size) {
     return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
 }
 
-static inline int fls_generic(size_t word) { return (sizeof(size_t) * 8) - 1 - __builtin_clzl(word); }
-static inline int ffs_generic(uint32_t word) {
-  int result = __builtin_ffs(word);
-  return result ? result - 1 : -1;
+static inline int fls_u32(unsigned int word) {
+  if (!word) return -1;
+  return 31 - __builtin_clz(word);
+}
+
+static inline int ffs_u32(unsigned int word) {
+  if (!word) return -1;
+  return __builtin_ctz(word);
+}
+
+static inline int fls_sizet(size_t word) {
+  if (!word) return -1;
+#if SIZE_MAX > 0xffffffffu
+  return 63 - __builtin_clzll((unsigned long long)word);
+#else
+  return fls_u32((unsigned int)word);
+#endif
 }
 
 static inline size_t block_size(tlsf_block_t* block) { return block->size & TLSF_SIZE_MASK; }
@@ -119,44 +138,47 @@ static inline void block_set_prev(tlsf_block_t* block, tlsf_block_t* prev) {
   *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*))) = prev;
 }
 
-static inline void mapping(size_t size, int* fli, int* sli) {
+static inline void mapping_insert(size_t size, int* fli, int* sli) {
   int fl, sl;
-  if (size < (1 << TLSF_FLI_OFFSET)) {
+  if (size < SMALL_BLOCK_SIZE) {
     fl = 0;
-    sl = size / (1 << (TLSF_FLI_OFFSET - TLSF_SLI));
+    sl = (int)size / (int)(SMALL_BLOCK_SIZE / SL_INDEX_COUNT);
   } else {
-    fl = fls_generic(size);
-    sl = (size >> (fl - TLSF_SLI)) ^ (1 << TLSF_SLI);
-    fl -= (TLSF_FLI_OFFSET - 1);
+    fl = fls_sizet(size);
+    sl = (int)(size >> (fl - SL_INDEX_COUNT_LOG2)) ^ (1 << SL_INDEX_COUNT_LOG2);
+    fl -= (FL_INDEX_SHIFT - 1);
   }
   *fli = fl;
   *sli = sl;
 }
 
-static inline tlsf_block_t* search_suitable_block(mm_allocator_t* ctrl, size_t size, int* fli, int* sli) {
-  mapping(size, fli, sli);
-  
-  // Check for a block in the ideal list
-  if ((ctrl->sl_bitmap[*fli] & (1U << *sli)) == 0) {
-    // No block in the ideal list, find the next biggest
-    int fl = *fli;
-    int sl = *sli + 1;
-    
-    // Find the next available SL slot in the current FL
-    uint32_t sl_map = ctrl->sl_bitmap[fl] & (~0U << sl);
-    if (sl_map == 0) {
-      // No available SL slots in the current FL, find the next FL
-      int fl_map = ctrl->fl_bitmap & (~0U << (fl + 1));
-      if (fl_map == 0) {
-        return NULL; // No suitable block found
-      }
-      *fli = ffs_generic(fl_map);
-      *sli = ffs_generic(ctrl->sl_bitmap[*fli]);
-    } else {
-      *sli = ffs_generic(sl_map);
-    }
+static inline void mapping_search(size_t size, int* fli, int* sli) {
+  if (size >= SMALL_BLOCK_SIZE) {
+    const int fl = fls_sizet(size);
+    const size_t round = ((size_t)1 << (fl - SL_INDEX_COUNT_LOG2)) - 1;
+    if (size <= SIZE_MAX - round) size += round;
   }
-  return ctrl->blocks[*fli][*sli];
+  mapping_insert(size, fli, sli);
+}
+
+static inline tlsf_block_t* search_suitable_block(mm_allocator_t* ctrl, size_t size, int* fli, int* sli) {
+  mapping_search(size, fli, sli);
+
+  int fl = *fli;
+  int sl = *sli;
+
+  unsigned int sl_map = ctrl->sl_bitmap[fl] & (~0U << sl);
+  if (!sl_map) {
+    const unsigned int fl_map = ctrl->fl_bitmap & (~0U << (fl + 1));
+    if (!fl_map) return NULL;
+    fl = ffs_u32(fl_map);
+    *fli = fl;
+    sl_map = ctrl->sl_bitmap[fl];
+  }
+
+  sl = ffs_u32(sl_map);
+  *sli = sl;
+  return ctrl->blocks[fl][sl];
 }
 
 static void remove_free_block_direct(mm_allocator_t* ctrl, tlsf_block_t* block, int fl, int sl) {
@@ -185,13 +207,13 @@ static void remove_free_block_direct(mm_allocator_t* ctrl, tlsf_block_t* block, 
 
 static void remove_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
   int fl, sl;
-  mapping(block_size(block), &fl, &sl);
+  mapping_insert(block_size(block), &fl, &sl);
   remove_free_block_direct(ctrl, block, fl, sl);
 }
 
 static void insert_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
   int fl, sl;
-  mapping(block_size(block), &fl, &sl);
+  mapping_insert(block_size(block), &fl, &sl);
     
   tlsf_block_t* head = ctrl->blocks[fl][sl];
   block->next_free = head;
@@ -211,7 +233,8 @@ static inline void* block_to_user(tlsf_block_t* block) { return (void*)((char*)b
 static inline tlsf_block_t* user_to_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_START_OFFSET); }
 
 
-void mm_get_mapping_indices(size_t size, int* fl, int* sl) { mapping(size, fl, sl); }
+void mm_get_mapping_indices(size_t size, int* fl, int* sl) { mapping_insert(size, fl, sl); }
+void mm_get_mapping_search_indices(size_t size, int* fl, int* sl) { mapping_search(size, fl, sl); }
 
 
 static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* block) {
@@ -333,7 +356,7 @@ int mm_validate(mm_allocator_t* ctrl) {
         
         /* Size Mapping Check */
         int mapped_fl, mapped_sl;
-        mapping(block_size(walk), &mapped_fl, &mapped_sl);
+        mapping_insert(block_size(walk), &mapped_fl, &mapped_sl);
         CHECK(mapped_fl == fl && mapped_sl == sl, "Block in wrong free list bucket");
 
         list_prev = walk;
@@ -354,7 +377,7 @@ static void mm_check_integrity(mm_allocator_t* ctrl) {
 #endif
 
 mm_allocator_t* mm_create(void* mem, size_t bytes) {
-  /* Overhead: Allocator + Alignment Padding + Prologue + Min Block + Epilogue */
+  /* Overhead: Allocator + Alignment Padding + Min Block + Epilogue */
   size_t overhead = sizeof(mm_allocator_t) + ALIGNMENT + BLOCK_HEADER_OVERHEAD + BLOCK_HEADER_OVERHEAD;
   if (bytes < overhead + TLSF_MIN_BLOCK_SIZE) return NULL;
 
@@ -389,21 +412,20 @@ int mm_add_pool(mm_allocator_t* allocator, void* mem, size_t bytes) {
 
   char* pool_end = pool_start + aligned_bytes;
 
-  /* 1. Create Prologue */
-  tlsf_block_t* prologue = (tlsf_block_t*)pool_start;
-  block_set_size(prologue, 0); /* Minimal prologue: only the size word exists */
-  block_set_used(prologue);
-  block_set_prev_used(prologue);
-
-  /* 2. Create Epilogue */
-  tlsf_block_t* epilogue = (tlsf_block_t*)(pool_end - BLOCK_START_OFFSET);
+  /* 1. Create Epilogue sentinel. */
+  tlsf_block_t* epilogue = (tlsf_block_t*)(pool_end - BLOCK_HEADER_OVERHEAD);
   block_set_size(epilogue, 0);
   block_set_used(epilogue);
   block_set_prev_free(epilogue);
 
-  /* 3. Create Main Free Block */
-  tlsf_block_t* block = (tlsf_block_t*)(pool_start + BLOCK_START_OFFSET);
-  size_t size = (char*)epilogue - (char*)block - BLOCK_HEADER_OVERHEAD;
+  /*
+  ** 2. Create main free block.
+  ** Conte-style: the first block's prev-phys pointer lives immediately before
+  ** its size word, and falls outside the pool. We never dereference it because
+  ** the first block is always marked prev-used.
+  */
+  tlsf_block_t* block = (tlsf_block_t*)pool_start;
+  size_t size = (size_t)((char*)epilogue - (char*)block - BLOCK_HEADER_OVERHEAD);
   
   block_set_size(block, size);
   block_set_free(block);
@@ -421,7 +443,10 @@ void* mm_malloc(mm_allocator_t* ctrl, size_t size) {
   mm_check_integrity(ctrl);
 
   if (size < TLSF_MIN_BLOCK_SIZE) size = TLSF_MIN_BLOCK_SIZE;
+  if (size >= BLOCK_SIZE_MAX) return NULL;
+  if (size > SIZE_MAX - (ALIGNMENT - 1)) return NULL;
   size = align_size(size);
+  if (size >= BLOCK_SIZE_MAX) return NULL;
 
   int fl, sl;
   tlsf_block_t* block = search_suitable_block(ctrl, size, &fl, &sl);
@@ -565,8 +590,20 @@ void* mm_memalign(mm_allocator_t* ctrl, size_t alignment, size_t size) {
   size_t requested_size = (size < TLSF_MIN_BLOCK_SIZE) ? TLSF_MIN_BLOCK_SIZE : size;
   requested_size = align_size(requested_size);
 
-  /* We need extra space for alignment and header */
-  size_t search_size = requested_size + alignment + BLOCK_HEADER_OVERHEAD;
+  /*
+  ** Conte TLSF requires an extra minimum free block worth of space so that if
+  ** the alignment gap would be too small to split, we can advance to the next
+  ** aligned boundary and still trim a valid leading free block.
+  */
+  const size_t gap_minimum = BLOCK_HEADER_OVERHEAD + TLSF_MIN_BLOCK_SIZE;
+  if (requested_size >= BLOCK_SIZE_MAX) return NULL;
+  if (alignment > SIZE_MAX - requested_size) return NULL;
+  size_t size_with_gap = requested_size + alignment;
+  if (gap_minimum > SIZE_MAX - size_with_gap) return NULL;
+  size_with_gap += gap_minimum;
+  if (size_with_gap > SIZE_MAX - (alignment - 1)) return NULL;
+  size_t search_size = (size_with_gap + (alignment - 1)) & ~(alignment - 1);
+  if (search_size >= BLOCK_SIZE_MAX) return NULL;
 
   int fl = 0, sl = 0;
   tlsf_block_t* block = search_suitable_block(ctrl, search_size, &fl, &sl);
@@ -579,39 +616,41 @@ void* mm_memalign(mm_allocator_t* ctrl, size_t alignment, size_t size) {
 
   uintptr_t user_addr = (uintptr_t)block_to_user(block);
   uintptr_t aligned_user = (user_addr + (alignment - 1)) & ~(alignment - 1);
-  tlsf_block_t* aligned_block = (tlsf_block_t*)(aligned_user - BLOCK_HEADER_OVERHEAD);
+  size_t gap = (size_t)(aligned_user - user_addr);
 
-  /* Compute prefix gap (bytes) between original header and aligned header */
-  ptrdiff_t prefix_bytes = (char*)aligned_block - (char*)block;
+  if (gap && gap < gap_minimum) {
+    const size_t gap_remain = gap_minimum - gap;
+    const size_t offset = (gap_remain > alignment) ? gap_remain : alignment;
+    /* Conte semantics: advance from the *first* aligned boundary, not from the raw pointer. */
+    aligned_user = ((aligned_user + offset) + (alignment - 1)) & ~(alignment - 1);
+    gap = (size_t)(aligned_user - user_addr);
+  }
 
-  if (prefix_bytes > 0) {
-    /* If the prefix is big enough to hold a free block, split it off */
-    if ((size_t)prefix_bytes >= BLOCK_HEADER_OVERHEAD + TLSF_MIN_BLOCK_SIZE) {
-      /* Create prefix free block (reuse original header) */
-      size_t prefix_data = (size_t)prefix_bytes - BLOCK_HEADER_OVERHEAD;
-      block_set_size(block, prefix_data);
-      block_set_free(block);
-      /* Aligned block follows prefix */
-      aligned_block = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + block_size(block));
-      /* Setup aligned block header */
-      size_t aligned_data = orig_size - ((size_t)prefix_bytes);
-      block_set_size(aligned_block, aligned_data);
-      /* The aligned block now has previous free */
-      block_set_prev_free(aligned_block);
-      block_set_prev(aligned_block, block);
-      /* Insert the prefix into free lists */
+  tlsf_block_t* aligned_block = block;
+
+  if (gap) {
+    /* Trim a leading free block (gap must be large enough to be a valid free block). */
+    if (gap < gap_minimum) {
       insert_free_block(ctrl, block);
-    } else {
-      /* Prefix too small to split: leave it as part of aligned_block */
-      aligned_block = block;
-      aligned_user = (uintptr_t)block_to_user(aligned_block);
-      prefix_bytes = 0;
+      mm_check_integrity(ctrl);
+      return NULL;
     }
-  } else {
-    /* No prefix; aligned_block is original block */
-    aligned_block = block;
-    aligned_user = (uintptr_t)block_to_user(aligned_block);
-    prefix_bytes = 0;
+
+    /* Leading prefix becomes a free block using the original header. */
+    const size_t prefix_payload = gap - BLOCK_HEADER_OVERHEAD;
+    const size_t aligned_payload = orig_size - gap;
+
+    block_set_size(block, prefix_payload);
+    block_set_free(block);
+
+    aligned_block = (tlsf_block_t*)((char*)block + gap);
+    aligned_block->size = 0;
+    block_set_size(aligned_block, aligned_payload);
+    block_set_free(aligned_block);
+    block_set_prev_free(aligned_block);
+    block_set_prev(aligned_block, block);
+
+    insert_free_block(ctrl, block);
   }
 
   /* At this point aligned_block points to a free block with sufficient space */
