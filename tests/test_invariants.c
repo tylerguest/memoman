@@ -1,5 +1,5 @@
 #include "test_framework.h"
-#include "../src/memoman_internal.h"
+#include "memoman_test_internal.h"
 #include <stddef.h>
 
 /* Helper to acccess internal block structure */

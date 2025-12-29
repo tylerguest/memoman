@@ -1,5 +1,5 @@
 #include "test_framework.h"
-#include "../src/memoman_internal.h"
+#include "memoman_test_internal.h"
 
 static int test_constants_match_tlsf(void) {
   ASSERT_EQ(BLOCK_HEADER_OVERHEAD, sizeof(size_t));

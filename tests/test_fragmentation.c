@@ -1,5 +1,5 @@
 #include "test_framework.h"
-#include "../src/memoman_internal.h"
+#include "memoman_test_internal.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -48,7 +48,6 @@ static double calculate_fragmentation(void) {
 
 /* Helper: count number of free blocks */
 static int count_free_blocks(void) {
-  extern mm_allocator_t* sys_allocator;
   if (!sys_allocator) return 0;
 
   int count = 0;

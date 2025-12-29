@@ -1,5 +1,5 @@
 #include "test_framework.h"
-#include "../src/memoman_internal.h"
+#include "memoman_test_internal.h"
 
 static int test_derived_constants_sane(void) {
   ASSERT((ALIGNMENT & (ALIGNMENT - 1)) == 0);

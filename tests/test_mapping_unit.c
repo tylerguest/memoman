@@ -1,5 +1,5 @@
 #include "test_framework.h"
-#include "../src/memoman_internal.h"
+#include "memoman_test_internal.h"
 
 /* 
  * Helper to calculate expected indices based on the new 8-byte alignment logic.

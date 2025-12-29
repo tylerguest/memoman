@@ -1,13 +1,10 @@
 #include "test_framework.h"
-#include "../src/memoman_internal.h"
+#include "memoman_test_internal.h"
 #include <stddef.h>
-
-/* Access internal TLSF control */
-extern mm_allocator_t* sys_allocator;
 
 /* Helper to access block fields */
 static inline tlsf_block_t* user_to_block_helper(void* ptr) {
-  return (tlsf_block_t*)((char*)ptr - BLOCK_HEADER_OVERHEAD);
+  return (tlsf_block_t*)((char*)ptr - BLOCK_START_OFFSET);
 }
 
 static int test_overhead_reduction(void) {
