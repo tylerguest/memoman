@@ -11,7 +11,7 @@ static int test_calloc_inst_basic() {
   ASSERT_NOT_NULL(alloc);
 
   /* Allocate array of 10 ints */
-  int* arr = mm_calloc_inst(alloc, 10, sizeof(int));
+  int* arr = (mm_calloc)(alloc, 10, sizeof(int));
   ASSERT_NOT_NULL(arr);
 
   /* Verify bounds (must be within stack buffer) */
@@ -33,7 +33,7 @@ static int test_calloc_inst_overflow() {
   mm_allocator_t* alloc = mm_create(buffer, sizeof(buffer));
   
   /* Attempt allocation that overflows size_t calculation */
-  void* p = mm_calloc_inst(alloc, SIZE_MAX, 2);
+  void* p = (mm_calloc)(alloc, SIZE_MAX, 2);
   ASSERT_NULL(p);
 
   return 1;
@@ -43,12 +43,12 @@ static int test_realloc_inst_growth() {
   uint8_t buffer[16384] __attribute__((aligned(16)));
   mm_allocator_t* alloc = mm_create(buffer, sizeof(buffer));
   
-  void* p = mm_malloc_inst(alloc, 64);
+  void* p = (mm_malloc)(alloc, 64);
   ASSERT_NOT_NULL(p);
   memset(p, 0xAA, 64);
 
   /* Grow block */
-  void* p2 = mm_realloc_inst(alloc, p, 128);
+  void* p2 = (mm_realloc)(alloc, p, 128);
   ASSERT_NOT_NULL(p2);
   
   /* Verify data preservation */
@@ -72,16 +72,16 @@ static int test_realloc_inst_oom() {
   ASSERT_NOT_NULL(alloc);
   
   /* Use up some space */
-  void* p = mm_malloc_inst(alloc, 2000);
+  void* p = (mm_malloc)(alloc, 2000);
   ASSERT_NOT_NULL(p);
 
   /* Try to grow beyond capacity (2000 -> 20000) */
   /* This should FAIL because instances cannot grow automatically */
-  void* p2 = mm_realloc_inst(alloc, p, 20000);
+  void* p2 = (mm_realloc)(alloc, p, 20000);
   ASSERT_NULL(p2);
 
   /* Original pointer should still be valid */
-  mm_free_inst(alloc, p);
+  (mm_free)(alloc, p);
   
   return 1;
 }
@@ -90,16 +90,16 @@ static int test_realloc_inst_inplace() {
   uint8_t buffer[16384] __attribute__((aligned(16)));
   mm_allocator_t* alloc = mm_create(buffer, sizeof(buffer));
 
-  void* p1 = mm_malloc_inst(alloc, 64);
-  void* p2 = mm_malloc_inst(alloc, 64);
+  void* p1 = (mm_malloc)(alloc, 64);
+  void* p2 = (mm_malloc)(alloc, 64);
   ASSERT_NOT_NULL(p1);
   ASSERT_NOT_NULL(p2);
 
   /* Free p2 to create a hole immediately after p1 */
-  mm_free_inst(alloc, p2);
+  (mm_free)(alloc, p2);
 
   /* Grow p1 into p2's space */
-  void* p3 = mm_realloc_inst(alloc, p1, 100);
+  void* p3 = (mm_realloc)(alloc, p1, 100);
   
   /* Should have coalesced and returned same pointer */
   ASSERT_EQ(p3, p1);

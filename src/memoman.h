@@ -28,21 +28,20 @@ mm_allocator_t* mm_create(void* mem, size_t bytes);
 int mm_add_pool(mm_allocator_t* alloc, void* mem, size_t bytes);
 
 /* Allocation */
-void* mm_malloc_inst(mm_allocator_t* alloc, size_t size);
-void  mm_free_inst(mm_allocator_t* alloc, void* ptr);
-void* mm_calloc_inst(mm_allocator_t* alloc, size_t nmemb, size_t size);
-void* mm_realloc_inst(mm_allocator_t* alloc, void* ptr, size_t size);
-void* mm_memalign_inst(mm_allocator_t* alloc, size_t alignment, size_t size);
+void* mm_malloc(mm_allocator_t* alloc, size_t size);
+void  mm_free(mm_allocator_t* alloc, void* ptr);
+void* mm_calloc(mm_allocator_t* alloc, size_t nmemb, size_t size);
+void* mm_realloc(mm_allocator_t* alloc, void* ptr, size_t size);
+void* mm_memalign(mm_allocator_t* alloc, size_t alignment, size_t size);
 
 /* Introspection */
-size_t mm_get_usable_size(mm_allocator_t* alloc, void* ptr);
-size_t mm_get_free_space_inst(mm_allocator_t* alloc);
-size_t mm_get_total_allocated_inst(mm_allocator_t* alloc);
-int mm_validate_inst(mm_allocator_t* alloc);
+size_t mm_usable_size(mm_allocator_t* alloc, void* ptr);
+size_t mm_free_space(mm_allocator_t* alloc);
+size_t mm_total_allocated(mm_allocator_t* alloc);
+int mm_validate(mm_allocator_t* alloc);
 
 #if defined(__cplusplus)
 }
 #endif
 
 #endif
-

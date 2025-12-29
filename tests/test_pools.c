@@ -9,7 +9,7 @@ static int test_add_pool_basic(void) {
   mm_allocator_t* alloc = mm_create(pool1, sizeof(pool1));
   ASSERT_NOT_NULL(alloc);
 
-  size_t initial_free = mm_get_free_space_inst(alloc);
+  size_t initial_free = mm_free_space(alloc);
 
   /* Add second pool */
   uint8_t pool2[4096] __attribute__((aligned(8)));
@@ -17,7 +17,7 @@ static int test_add_pool_basic(void) {
   ASSERT_EQ(res, 1);
 
   /* Free space should increase */
-  size_t new_free = mm_get_free_space_inst(alloc);
+  size_t new_free = mm_free_space(alloc);
   ASSERT_GT(new_free, initial_free);
   ASSERT_GT(new_free, initial_free + 3000); /* Should add significant space */
 
@@ -31,11 +31,11 @@ static int test_allocation_across_pools(void) {
   mm_allocator_t* alloc = mm_create(pool1, sizeof(pool1));
   
   /* Fill Pool 1 */
-  void* p1 = mm_malloc_inst(alloc, 3000);
+  void* p1 = (mm_malloc)(alloc, 3000);
   ASSERT_NOT_NULL(p1);
 
   /* Try to alloc another 3000 - should fail */
-  void* p2 = mm_malloc_inst(alloc, 3000);
+  void* p2 = (mm_malloc)(alloc, 3000);
   ASSERT_NULL(p2);
 
   /* Add Pool 2: 8KB */
@@ -43,7 +43,7 @@ static int test_allocation_across_pools(void) {
   mm_add_pool(alloc, pool2, sizeof(pool2));
 
   /* Now alloc should succeed (from Pool 2) */
-  p2 = mm_malloc_inst(alloc, 3000);
+  p2 = (mm_malloc)(alloc, 3000);
   ASSERT_NOT_NULL(p2);
 
   /* Verify pointers are in different regions */

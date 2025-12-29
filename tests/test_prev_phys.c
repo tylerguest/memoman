@@ -51,8 +51,8 @@ static int test_free_sets_next_prev_link(void) {
   uint8_t pool[16384] __attribute__((aligned(ALIGNMENT)));
   mm_allocator_t* alloc = make_allocator(pool, sizeof(pool));
 
-  void* p1 = mm_malloc_inst(alloc, 64);
-  void* p2 = mm_malloc_inst(alloc, 64);
+  void* p1 = (mm_malloc)(alloc, 64);
+  void* p2 = (mm_malloc)(alloc, 64);
   ASSERT_NOT_NULL(p1);
   ASSERT_NOT_NULL(p2);
 
@@ -60,11 +60,11 @@ static int test_free_sets_next_prev_link(void) {
   tlsf_block_t* b2 = user_to_block_local(p2);
   ASSERT(!(b2->size & TLSF_PREV_FREE));
 
-  mm_free_inst(alloc, p1);
+  (mm_free)(alloc, p1);
   ASSERT(b2->size & TLSF_PREV_FREE);
   ASSERT_EQ(block_prev_link_local(b2), b1);
 
-  mm_free_inst(alloc, p2);
+  (mm_free)(alloc, p2);
   return 1;
 }
 
@@ -72,11 +72,11 @@ static int test_split_updates_next_links(void) {
   uint8_t pool[16384] __attribute__((aligned(ALIGNMENT)));
   mm_allocator_t* alloc = make_allocator(pool, sizeof(pool));
 
-  void* big = mm_malloc_inst(alloc, 256);
+  void* big = (mm_malloc)(alloc, 256);
   ASSERT_NOT_NULL(big);
-  mm_free_inst(alloc, big);
+  (mm_free)(alloc, big);
 
-  void* small = mm_malloc_inst(alloc, 64);
+  void* small = (mm_malloc)(alloc, 64);
   ASSERT_NOT_NULL(small);
 
   tlsf_block_t* used = user_to_block_local(small);
@@ -90,7 +90,7 @@ static int test_split_updates_next_links(void) {
   ASSERT(next->size & TLSF_PREV_FREE);
   ASSERT_EQ(block_prev_link_local(next), remainder);
 
-  mm_free_inst(alloc, small);
+  (mm_free)(alloc, small);
   return 1;
 }
 
@@ -98,15 +98,15 @@ static int test_realloc_grow_clears_next_prev_free(void) {
   uint8_t pool[16384] __attribute__((aligned(ALIGNMENT)));
   mm_allocator_t* alloc = make_allocator(pool, sizeof(pool));
 
-  void* p1 = mm_malloc_inst(alloc, 128);
-  void* p2 = mm_malloc_inst(alloc, 256);
+  void* p1 = (mm_malloc)(alloc, 128);
+  void* p2 = (mm_malloc)(alloc, 256);
   ASSERT_NOT_NULL(p1);
   ASSERT_NOT_NULL(p2);
 
-  mm_free_inst(alloc, p2);
+  (mm_free)(alloc, p2);
 
   void* original = p1;
-  void* grown = mm_realloc_inst(alloc, p1, 320);
+  void* grown = (mm_realloc)(alloc, p1, 320);
   ASSERT_NOT_NULL(grown);
   ASSERT_EQ(grown, original);
 
@@ -121,7 +121,7 @@ static int test_realloc_grow_clears_next_prev_free(void) {
     ASSERT_EQ(block_prev_link_local(next2), next);
   }
 
-  mm_free_inst(alloc, grown);
+  (mm_free)(alloc, grown);
   return 1;
 }
 
@@ -129,10 +129,10 @@ static int test_realloc_shrink_sets_next_prev_link(void) {
   uint8_t pool[16384] __attribute__((aligned(ALIGNMENT)));
   mm_allocator_t* alloc = make_allocator(pool, sizeof(pool));
 
-  void* p = mm_malloc_inst(alloc, 512);
+  void* p = (mm_malloc)(alloc, 512);
   ASSERT_NOT_NULL(p);
 
-  void* shrunk = mm_realloc_inst(alloc, p, 128);
+  void* shrunk = (mm_realloc)(alloc, p, 128);
   ASSERT_NOT_NULL(shrunk);
   ASSERT_EQ(shrunk, p);
 
@@ -146,7 +146,7 @@ static int test_realloc_shrink_sets_next_prev_link(void) {
   ASSERT(next->size & TLSF_PREV_FREE);
   ASSERT_EQ(block_prev_link_local(next), remainder);
 
-  mm_free_inst(alloc, shrunk);
+  (mm_free)(alloc, shrunk);
   return 1;
 }
 

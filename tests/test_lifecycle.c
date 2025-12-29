@@ -13,7 +13,7 @@ static int test_stack_pool() {
   ASSERT_NOT_NULL(alloc);
   
   /* 2. Allocate from it */
-  void* p1 = mm_malloc_inst(alloc, 64);
+  void* p1 = (mm_malloc)(alloc, 64);
   ASSERT_NOT_NULL(p1);
   
   /* Verify p1 is inside buffer */
@@ -23,7 +23,7 @@ static int test_stack_pool() {
   ASSERT_LT(p1_addr, buf_addr + sizeof(buffer));
   
   /* 3. Free and Destroy */
-  mm_free_inst(alloc, p1);
+  (mm_free)(alloc, p1);
   
   /* Stack buffer is automatically reclaimed, no leaks */
   return 1;
@@ -43,8 +43,8 @@ static int test_multiple_pools() {
   ASSERT_NE(a1, a2);
 
   /* 2. Alloc from both */
-  void* p1 = mm_malloc_inst(a1, 128);
-  void* p2 = mm_malloc_inst(a2, 128);
+  void* p1 = (mm_malloc)(a1, 128);
+  void* p2 = (mm_malloc)(a2, 128);
   
   ASSERT_NOT_NULL(p1);
   ASSERT_NOT_NULL(p2);

@@ -54,11 +54,11 @@ void mm_destroy_wrapper(void) {
 }
 
 void* mm_malloc_wrapper(size_t size) {
-    return mm_malloc_inst(bench_allocator, size);
+    return mm_malloc(bench_allocator, size);
 }
 
 void mm_free_wrapper(void* ptr) {
-    mm_free_inst(bench_allocator, ptr);
+    mm_free(bench_allocator, ptr);
 }
 
 /* Timing Utils */

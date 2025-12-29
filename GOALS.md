@@ -1,6 +1,20 @@
 # Memoman Roadmap: Conte-Grade TLSF (Production-Ready)
 
-This document tracks the remaining work to make memoman a production-grade TLSF allocator comparable to Matthew Conte’s TLSF 3.1: same core invariants, equivalent API surface, strong validation tooling, and clean portability.
+This document tracks the remaining work to make memoman a production-grade TLSF allocator comparable to Matthew Conte’s
+TLSF 3.1: same core invariants, equivalent API surface, strong validation tooling, and clean portability.
+
+## What “Equivalent to Conte TLSF 3.1” Means
+
+We’re “equivalent” when these are true:
+
+- **Semantics parity**: For the same pool(s) and the same deterministic sequence of alloc/free/realloc/memalign operations,
+  memoman produces valid results with the same rules as Conte TLSF 3.1 (alignment, usable size behavior,
+  splitting/coalescing rules, and failure modes).
+- **Invariant parity**: All TLSF invariants hold at all times (bitmaps, free lists, prev-phys linkage, flags, boundaries, sentinels).
+- **Complexity parity**: Critical-path operations remain O(1) with only bounded loops (bounded by FL/SL counts), never proportional to heap size.
+
+“Surpass Conte” comes only after parity, and should be **additive** (stronger validation, better determinism tooling,
+nicer integration), never at the expense of correctness or O(1) guarantees.
 
 ## Phase 0: Lock In Conte’s Core Invariants (Non-Negotiable)
 
@@ -9,7 +23,7 @@ Before adding features, make sure your layout + invariants match the reference m
 - [x] **Block layout matches TLSF 3.1 semantics**
   - **Goal**: Keep “user data starts right after size” semantics (Conte’s block_start_offset).
   - **Requirement**: Ensure your “free-list pointers live in user payload when block is free” behavior is always valid.
-  - **Deliverable**: Document the exact header/payload layout with an ASCII diagram in memoman.h.
+  - **Deliverable**: Document the exact header/payload layout with an ASCII diagram in memoman.c (public header stays minimal).
 
 - [x] **Prev-physical linkage is correct and updated everywhere**
   - **Goal**: Your equivalent of prev_phys_block must be correct after: split, merge, add_pool, realloc growth, and free.
@@ -27,13 +41,30 @@ Before adding features, make sure your layout + invariants match the reference m
 - [ ] **Mapping + bitmap operations are reference-faithful**
   - **Goal**: mapping(size)->(fl,sl) and “find suitable block” behavior must match TLSF expectations.
   - **Requirement**: Bit-scan wrappers must be safe for 32-bit/64-bit and for edge cases.
-  - **Deliverable**: A small deterministic test that compares your (fl,sl) results to Conte’s for a sweep of sizes.
+  - **Deliverable**: A deterministic test that compares your (fl,sl) results to Conte’s for a sweep of sizes (differential test).
+
+- [ ] **Differential parity harness (Conte vs memoman)**
+  - **Goal**: Make regressions obvious by running the same operation stream against both allocators.
+  - **Requirement**: Fixed seed, deterministic operation generator, and “shrinkable” failures (log the minimal reproducer).
+  - **Deliverables**:
+    - a parity test that links Conte TLSF side-by-side (in `tests/`)
+    - a golden log format for failing sequences (easy to replay)
 
 ## Phase 1: API Parity (The “Conte Standard” Surface)
 
 Get to a point where someone can swap your allocator in where they’d use TLSF 3.1.
 
-- [x] **Aligned Allocation API (`mm_memalign_inst`)**
+### API Equivalence Map (Conte → memoman)
+
+- `tlsf_create_with_pool` → `mm_create` (pool includes allocator control region)
+- `tlsf_add_pool` → `mm_add_pool`
+- `tlsf_malloc` / `tlsf_free` → `mm_malloc` / `mm_free`
+- `tlsf_realloc` → `mm_realloc`
+- `tlsf_memalign` → `mm_memalign`
+- `tlsf_block_size` → `mm_usable_size`
+- `tlsf_check` / `tlsf_check_pool` → `mm_validate` (and pool-specific validation in Phase 2)
+
+- [x] **Aligned Allocation API (`mm_memalign`)**
   - **Goal**: Support arbitrary alignment requests (4KB pages, cache lines, SIMD).
   - **Requirement**: Correctly handle padding, gap filling, and split behavior without breaking coalescing invariants.
   - **Add**: A torture test that allocates various alignments and frees in random order.
@@ -65,13 +96,14 @@ Get to a point where someone can swap your allocator in where they’d use TLSF 
 
 This is what makes TLSF implementations usable by other people.
 
-- [ ] **Full internal validation (real `mm_validate_inst`)**
+- [ ] **Full internal validation (real `mm_validate`)**
   - **Goal**: Equivalent of Conte’s internal checks: bitmap consistency, free-list correctness, block boundary invariants.
   - **Requirements**:
     - Verify free list pointers are coherent (next/prev links)
     - Verify bitmaps match list emptiness
     - Verify prev_free flags match the physical neighbor state
     - Verify prev-physical pointers are correct
+    - Verify per-pool prologue/epilogue invariants (no cross-pool walks)
   - **Deliverable**: `MM_DEBUG` build flag that turns validation on aggressively.
 
 - [ ] **Pointer safety policy (debug mode)**
@@ -86,11 +118,11 @@ This is what makes TLSF implementations usable by other people.
   - **Goal**: Prove no corruption under randomized allocate/free/realloc patterns.
   - **Deliverables**:
     - random test runner with fixed seed support
-    - comparison mode against malloc for basic invariants (not performance)
+    - comparison mode against Conte TLSF 3.1 for behavior parity (preferred)
 
 ## Phase 3: Portability & Configuration (32/64-bit, alignment, knobs)
 
-Your current headers still read like “64-bit only, 8-byte aligned forever”.
+Keep the public API small, but make the implementation portable and configurable like TLSF.
 
 - [ ] **Portability baseline**
   - **Goal**: Support 32-bit and 64-bit cleanly (LP64 + LLP64 assumptions avoided).
@@ -132,7 +164,7 @@ Once correctness is solid, tune toward “Conte-like” throughput and predictab
 ## Phase 6: Documentation & Polish (Conte-style)
 
 - [ ] **Header + internal comment pass (“Conte tone”)**
-  - **Goal**: Your memoman.h/memoman.c should read like a small allocator library others can adopt.
+  - **Goal**: Your `memoman.h`/`memoman.c` should read like a small allocator library others can adopt.
   - **Deliverables**:
     - top-of-file overview comment: algorithm + invariants + constraints
     - per-function contracts: inputs, outputs, failure modes
@@ -144,3 +176,19 @@ Once correctness is solid, tune toward “Conte-like” throughput and predictab
     - minimum block size (and why)
     - alignment defaults/config
     - pool removal support (if not implemented)
+
+## Phase 7: Surpass Conte (Only After Parity)
+
+Once parity is proven by differential testing, memoman can go beyond TLSF 3.1 without compromising O(1):
+
+- [ ] **Better determinism tooling**
+  - **Goal**: Make worst-case behavior auditable and repeatable.
+  - **Deliverables**: optional trace hooks, operation counters, and per-op timing hooks (no OS calls in core).
+
+- [ ] **Stronger debug diagnostics**
+  - **Goal**: Catch corruption earlier than “something crashed”.
+  - **Deliverables**: optional red-zones, poison patterns, and stricter invalid-pointer handling in debug builds.
+
+- [ ] **Conte-grade documentation + examples**
+  - **Goal**: Make integration trivially obvious (one page).
+  - **Deliverables**: minimal example, FAQ (alignment, pools, min block), and “gotchas” section.

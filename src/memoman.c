@@ -294,7 +294,7 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
 }
 
 
-int mm_validate_inst(mm_allocator_t* ctrl) {
+int mm_validate(mm_allocator_t* ctrl) {
   if (!ctrl) return 0;
 
   #define CHECK(cond, msg) do { if (!(cond)) { return 0; } } while(0)
@@ -347,7 +347,7 @@ int mm_validate_inst(mm_allocator_t* ctrl) {
 
 #ifdef MM_DEBUG
 static void mm_check_integrity(mm_allocator_t* ctrl) {
-  assert(mm_validate_inst(ctrl) && "Heap integrity check failed");
+  assert(mm_validate(ctrl) && "Heap integrity check failed");
 }
 #else
 #define mm_check_integrity(ctrl) ((void)0)
@@ -416,7 +416,7 @@ int mm_add_pool(mm_allocator_t* allocator, void* mem, size_t bytes) {
   return 1;
 }
 
-void* mm_malloc_inst(mm_allocator_t* ctrl, size_t size) {
+void* mm_malloc(mm_allocator_t* ctrl, size_t size) {
   if (!ctrl || size == 0) return NULL;
   mm_check_integrity(ctrl);
 
@@ -443,7 +443,7 @@ void* mm_malloc_inst(mm_allocator_t* ctrl, size_t size) {
   return block_to_user(block);
 }
 
-void mm_free_inst(mm_allocator_t* ctrl, void* ptr) {
+void mm_free(mm_allocator_t* ctrl, void* ptr) {
   if (!ptr || !ctrl) return;
   mm_check_integrity(ctrl);
 
@@ -466,10 +466,10 @@ void mm_free_inst(mm_allocator_t* ctrl, void* ptr) {
   mm_check_integrity(ctrl);
 }
 
-void* mm_calloc_inst(mm_allocator_t* ctrl, size_t nmemb, size_t size) {
+void* mm_calloc(mm_allocator_t* ctrl, size_t nmemb, size_t size) {
   if (nmemb != 0 && size > SIZE_MAX / nmemb) return NULL;
   size_t total = nmemb * size;
-  void* p = mm_malloc_inst(ctrl, total);
+  void* p = mm_malloc(ctrl, total);
   if (p) memset(p, 0, total);
   return p;
 }
@@ -530,9 +530,9 @@ static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
   return -1;
 }
 
-void* mm_realloc_inst(mm_allocator_t* ctrl, void* ptr, size_t size) {
-  if (!ptr) return mm_malloc_inst(ctrl, size);
-  if (size == 0) { mm_free_inst(ctrl, ptr); return NULL; }
+void* mm_realloc(mm_allocator_t* ctrl, void* ptr, size_t size) {
+  if (!ptr) return mm_malloc(ctrl, size);
+  if (size == 0) { mm_free(ctrl, ptr); return NULL; }
 
   int status = try_realloc_inplace(ctrl, ptr, size);
   
@@ -542,22 +542,22 @@ void* mm_realloc_inst(mm_allocator_t* ctrl, void* ptr, size_t size) {
   }
 
   /* Status 1: Needs move */
-  void* new_ptr = mm_malloc_inst(ctrl, size);
+  void* new_ptr = mm_malloc(ctrl, size);
   if (new_ptr) {
-    size_t old_usable = mm_get_usable_size(ctrl, ptr);
+    size_t old_usable = mm_usable_size(ctrl, ptr);
     memcpy(new_ptr, ptr, (old_usable < size) ? old_usable : size);
-    mm_free_inst(ctrl, ptr);
+    mm_free(ctrl, ptr);
   }
   return new_ptr;
 }
 
-void* mm_memalign_inst(mm_allocator_t* ctrl, size_t alignment, size_t size) {
+void* mm_memalign(mm_allocator_t* ctrl, size_t alignment, size_t size) {
   if (!ctrl) return NULL;
   if (alignment == 0 || (alignment & (alignment - 1)) != 0) return NULL; /* must be power of two */
   if (size == 0) return NULL;
 
   /* If alignment is <= default alignment, regular malloc suffices */
-  if (alignment <= ALIGNMENT) return mm_malloc_inst(ctrl, size);
+  if (alignment <= ALIGNMENT) return mm_malloc(ctrl, size);
 
   mm_check_integrity(ctrl);
 
@@ -635,7 +635,7 @@ void* mm_memalign_inst(mm_allocator_t* ctrl, size_t alignment, size_t size) {
   return block_to_user(aligned_block);
 }
 
-size_t mm_get_usable_size(mm_allocator_t* allocator, void* ptr) {
+size_t mm_usable_size(mm_allocator_t* allocator, void* ptr) {
   if (!allocator || !ptr) return 0;
 
   /* Main heap blocks */
@@ -645,12 +645,12 @@ size_t mm_get_usable_size(mm_allocator_t* allocator, void* ptr) {
   return block_size(block);
 }
 
-size_t mm_get_free_space_inst(mm_allocator_t* allocator) {
+size_t mm_free_space(mm_allocator_t* allocator) {
   if (!allocator) return 0;
   return allocator->current_free_size;
 }
 
-size_t mm_get_total_allocated_inst(mm_allocator_t* allocator) {
+size_t mm_total_allocated(mm_allocator_t* allocator) {
   if (!allocator) return 0;
   return allocator->total_pool_size - allocator->current_free_size;
 }

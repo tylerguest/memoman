@@ -25,7 +25,7 @@ static int test_split_respects_min_block_size(void) {
   mm_allocator_t* alloc = mm_create(pool, sizeof(pool));
   ASSERT_NOT_NULL(alloc);
 
-  size_t total_free = mm_get_free_space_inst(alloc);
+  size_t total_free = mm_free_space(alloc);
   ASSERT_GT(total_free, TLSF_MIN_BLOCK_SIZE + BLOCK_HEADER_OVERHEAD);
 
   /* Allocate leaving exactly (or more than) TLSF_MIN_BLOCK_SIZE for the remainder. */
@@ -33,28 +33,28 @@ static int test_split_respects_min_block_size(void) {
   req_split &= ~(ALIGNMENT - 1);
   ASSERT_GT(req_split, 0);
 
-  void* p = mm_malloc_inst(alloc, req_split);
+  void* p = (mm_malloc)(alloc, req_split);
   ASSERT_NOT_NULL(p);
 
-  size_t free_after_split = mm_get_free_space_inst(alloc);
+  size_t free_after_split = mm_free_space(alloc);
   ASSERT_GE(free_after_split, TLSF_MIN_BLOCK_SIZE);
 
-  mm_free_inst(alloc, p);
-  ASSERT(mm_validate_inst(alloc));
+  (mm_free)(alloc, p);
+  ASSERT((mm_validate)(alloc));
 
   /* Allocate leaving a remainder smaller than TLSF_MIN_BLOCK_SIZE: should not split. */
-  total_free = mm_get_free_space_inst(alloc);
+  total_free = mm_free_space(alloc);
   size_t req_nosplit = total_free - BLOCK_HEADER_OVERHEAD - (TLSF_MIN_BLOCK_SIZE - ALIGNMENT);
   req_nosplit &= ~(ALIGNMENT - 1);
   ASSERT_GT(req_nosplit, 0);
   ASSERT_LE(req_nosplit, total_free);
 
-  p = mm_malloc_inst(alloc, req_nosplit);
+  p = (mm_malloc)(alloc, req_nosplit);
   ASSERT_NOT_NULL(p);
-  ASSERT_EQ(mm_get_free_space_inst(alloc), 0);
+  ASSERT_EQ(mm_free_space(alloc), 0);
 
-  mm_free_inst(alloc, p);
-  ASSERT(mm_validate_inst(alloc));
+  (mm_free)(alloc, p);
+  ASSERT((mm_validate)(alloc));
 
   return 1;
 }
