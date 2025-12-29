@@ -1,6 +1,7 @@
 #include "test_framework.h"
 #include "../src/memoman.h"
 #include <limits.h>
+#include <stdint.h>
 
 /* === Edge Cases === */
 

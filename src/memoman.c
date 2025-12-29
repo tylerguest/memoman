@@ -1,6 +1,6 @@
 #define _GNU_SOURCE
 
-#include "memoman.h"
+#include "memoman_internal.h"
 #include <string.h>
 #include <assert.h>
 #include <stdint.h>

@@ -1,5 +1,5 @@
 #include "test_framework.h"
-#include "../src/memoman.h"
+#include "../src/memoman_internal.h"
 
 static inline tlsf_block_t* user_to_block_local(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_START_OFFSET); }
 static inline size_t payload_size(const tlsf_block_t* block) { return block->size & TLSF_SIZE_MASK; }

@@ -1,5 +1,6 @@
 #include "test_framework.h"
 #include "../src/memoman.h"
+#include <stdint.h>
 
 static int test_add_pool_basic(void) {
   /* Create allocator with small initial pool */

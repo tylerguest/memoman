@@ -15,7 +15,7 @@ Before adding features, make sure your layout + invariants match the reference m
   - **Goal**: Your equivalent of prev_phys_block must be correct after: split, merge, add_pool, realloc growth, and free.
   - **Requirement**: Every time a block boundary changes, update the next block’s “prev pointer” and “prev_free bit”.
 
-- [ ] **Minimum block size rules are derived, not guessed**
+- [x] **Minimum block size rules are derived, not guessed**
   - **Goal**: Replace “magic constants” with derived constraints like Conte:
     - minimum block size required to store free-list pointers
     - header overhead vs. usable payload accounting

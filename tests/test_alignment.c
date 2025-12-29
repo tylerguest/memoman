@@ -1,5 +1,5 @@
 #include "test_framework.h"
-#include "../src/memoman.h"
+#include "../src/memoman_internal.h"
 
 static int test_basic_alignment(void) {
   void* ptr1 = mm_malloc(1);   

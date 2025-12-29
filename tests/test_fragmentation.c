@@ -1,5 +1,5 @@
-#include "../src/memoman.h"
 #include "test_framework.h"
+#include "../src/memoman_internal.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -13,8 +13,6 @@
  * - 100% = Free space is maximally fragmented into small pieces
  */
 static double calculate_fragmentation(void) {
-  extern mm_allocator_t* sys_allocator;
-
   if (!sys_allocator) return 0.0;
 
   size_t total_free = 0;
