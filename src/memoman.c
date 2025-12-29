@@ -236,6 +236,13 @@ int mm_validate_inst(mm_allocator_t* ctrl) {
         CHECK(block_is_free(walk), "Used block found in free list");
         CHECK(walk->prev_free == list_prev, "Free list prev pointer broken");
         CHECK((block_size(walk) % ALIGNMENT) == 0, "Free block size unaligned");
+        CHECK(block_size(walk) >= TLSF_MIN_BLOCK_SIZE, "Free block too small");
+
+        /* Prev-physical linkage: the next block must mark prev as free and point back to us. */
+        tlsf_block_t* phys_next = block_next_safe(ctrl, walk);
+        CHECK(phys_next != NULL, "Free block missing next physical");
+        CHECK(block_is_prev_free(phys_next), "Next block missing PREV_FREE");
+        CHECK(block_prev(phys_next) == walk, "Next block prev pointer mismatch");
         
         /* Size Mapping Check */
         int mapped_fl, mapped_sl;
@@ -314,7 +321,6 @@ int mm_add_pool(mm_allocator_t* allocator, void* mem, size_t bytes) {
   block_set_size(block, size);
   block_set_free(block);
   block_set_prev_used(block);
-  block_set_prev(block, prologue);
   block_set_prev(epilogue, block);
   
   insert_free_block(allocator, block);
@@ -535,7 +541,6 @@ void* mm_memalign_inst(mm_allocator_t* ctrl, size_t alignment, size_t size) {
   block_set_used(aligned_block);
   tlsf_block_t* next = block_next_safe(ctrl, aligned_block);
   if (next) {
-    block_set_prev(next, aligned_block);
     block_set_prev_used(next);
   }
 

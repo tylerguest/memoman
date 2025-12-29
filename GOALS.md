@@ -11,7 +11,7 @@ Before adding features, make sure your layout + invariants match the reference m
   - **Requirement**: Ensure your “free-list pointers live in user payload when block is free” behavior is always valid.
   - **Deliverable**: Document the exact header/payload layout with an ASCII diagram in memoman.h.
 
-- [ ] **Prev-physical linkage is correct and updated everywhere**
+- [x] **Prev-physical linkage is correct and updated everywhere**
   - **Goal**: Your equivalent of prev_phys_block must be correct after: split, merge, add_pool, realloc growth, and free.
   - **Requirement**: Every time a block boundary changes, update the next block’s “prev pointer” and “prev_free bit”.
 
