@@ -1,4 +1,3 @@
-
 #ifndef MEMOMAN_H
 #define MEMOMAN_H
 
@@ -9,27 +8,27 @@
 /* === Internal Constants === */
 /* ========================== */
 
-#define ALIGNMENT               8
-#define LARGE_ALLOC_THRESHOLD   (1024 * 1024)
-#define INITIAL_HEAP_SIZE       (1024 * 1024)
-#define HEAP_GROWTH_FACTOR      2
-#define MAX_HEAP_SIZE           (1UL << 30) /* 1 GiB reserved virtual space */
-#define TLSF_MIN_BLOCK_SIZE     24          /* Constraint: 32B physical min - 8B overhead */
-#define TLSF_FLI_MAX            30
-#define TLSF_SLI                5
-#define TLSF_SLI_COUNT          (1 << TLSF_SLI)
-#define TLSF_FLI_OFFSET         8           /* TLSF_SLI (5) + LOG2_ALIGN (3) */
+#define ALIGNMENT 8
+#define LARGE_ALLOC_THRESHOLD (1024 * 1024)
+#define INITIAL_HEAP_SIZE (1024 * 1024)
+#define HEAP_GROWTH_FACTOR 2
+#define MAX_HEAP_SIZE (1UL << 30) /* 1 GiB reserved virtual space */
+#define TLSF_MIN_BLOCK_SIZE 24 /* Constraint: 32B physical min - 8B overhead */
+#define TLSF_FLI_MAX 30
+#define TLSF_SLI 5
+#define TLSF_SLI_COUNT (1 << TLSF_SLI)
+#define TLSF_FLI_OFFSET 8 /* TLSF_SLI (5) + LOG2_ALIGN (3) */
 
-#define TLSF_BLOCK_FREE         (1 << 0)
-#define TLSF_PREV_FREE          (1 << 1)
-#define TLSF_SIZE_MASK          (~(size_t)3)
-#define LARGE_BLOCK_MAGIC       0xDEADB10C
-#define TLSF_BLOCK_MAGIC        0xCAFEBABE
+#define TLSF_BLOCK_FREE (1 << 0)
+#define TLSF_PREV_FREE (1 << 1)
+#define TLSF_SIZE_MASK (~(size_t)3)
+#define LARGE_BLOCK_MAGIC 0xDEADB10C
+#define TLSF_BLOCK_MAGIC 0xCAFEBABE
 
 #ifdef DEBUG_OUTPUT
-#define BLOCK_HEADER_OVERHEAD   (sizeof(size_t) + sizeof(uint32_t) + 12)
+#define BLOCK_HEADER_OVERHEAD (sizeof(size_t) + sizeof(uint32_t) + 12)
 #else
-#define BLOCK_HEADER_OVERHEAD   sizeof(size_t)
+#define BLOCK_HEADER_OVERHEAD sizeof(size_t)
 #endif
 
 /* ======================= */
@@ -113,10 +112,10 @@ int mm_validate_inst(mm_allocator_t* allocator);
 /* === Global Wrapper API === */
 /* ========================== */
 
-int mm_init(void);                             /* Initialize global default instance */
-void mm_destroy(void);                         /* Destroy global default instance */
-void* mm_malloc(size_t size);                  /* Allocate from global instance */
-void mm_free(void* ptr);                       /* Free from global instance */
+int mm_init(void);                             // Initialize global default instance
+void mm_destroy(void);                         // Destroy global default instance
+void* mm_malloc(size_t size);                  // Allocate from global instance
+void mm_free(void* ptr);                       // Free from global instance
 void* mm_calloc(size_t nmemb, size_t size);
 void* mm_realloc(void* ptr, size_t size);
 void* mm_memalign(size_t alignment, size_t size);
@@ -128,4 +127,4 @@ void mm_print_free_list(void);
 void mm_reset_allocator(void);
 int mm_validate(void);
 
-#endif /* MEMOMAN_H */
+#endif 

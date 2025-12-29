@@ -27,10 +27,7 @@ static inline int ffs_generic(uint32_t word) {
 static inline size_t block_size(tlsf_block_t* block) { return block->size & TLSF_SIZE_MASK; }
 static inline int block_is_free(tlsf_block_t* block) { return (block->size & TLSF_BLOCK_FREE) != 0; }
 static inline int block_is_prev_free(tlsf_block_t* block) { return (block->size & TLSF_PREV_FREE) != 0; }
-static inline void block_set_size(tlsf_block_t* block, size_t size) {
-  size_t flags = block->size & ~TLSF_SIZE_MASK;
-  block->size = size | flags;
-}
+static inline void block_set_size(tlsf_block_t* block, size_t size) { size_t flags = block->size & ~TLSF_SIZE_MASK; block->size = size | flags; }
 static inline void block_set_free(tlsf_block_t* block) { block->size |= TLSF_BLOCK_FREE; }
 static inline void block_set_used(tlsf_block_t* block) { block->size &= ~TLSF_BLOCK_FREE; }
 static inline void block_set_prev_free(tlsf_block_t* block) { block->size |= TLSF_PREV_FREE; }
@@ -53,110 +50,99 @@ static inline int block_check_magic(tlsf_block_t* block) {
 #endif
 }
 
-static inline tlsf_block_t* block_prev(tlsf_block_t* block) { 
-  return *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*)));
-}
+static inline tlsf_block_t* block_prev(tlsf_block_t* block) { return *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*))); }
 
-static inline void block_set_prev(tlsf_block_t* block, tlsf_block_t* prev) { 
-  *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*))) = prev;
-}
+static inline void block_set_prev(tlsf_block_t* block, tlsf_block_t* prev) { *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*))) = prev; }
 
 static inline void mapping(size_t size, int* fli, int* sli) {
-    int fl, sl;
-    if (size < (1 << TLSF_FLI_OFFSET)) {
-        fl = 0;
-        sl = size / (1 << (TLSF_FLI_OFFSET - TLSF_SLI));
-    } else {
-        fl = fls_generic(size);
-        sl = (size >> (fl - TLSF_SLI)) ^ (1 << TLSF_SLI);
-        fl -= (TLSF_FLI_OFFSET - 1);
-    }
-    *fli = fl;
-    *sli = sl;
+  int fl, sl;
+  if (size < (1 << TLSF_FLI_OFFSET)) {
+    fl = 0;
+    sl = size / (1 << (TLSF_FLI_OFFSET - TLSF_SLI));
+  } else {
+    fl = fls_generic(size);
+    sl = (size >> (fl - TLSF_SLI)) ^ (1 << TLSF_SLI);
+    fl -= (TLSF_FLI_OFFSET - 1);
+  }
+  *fli = fl;
+  *sli = sl;
 }
 
 static inline tlsf_block_t* search_suitable_block(mm_allocator_t* ctrl, size_t size, int* fli, int* sli) {
-    mapping(size, fli, sli);
+  mapping(size, fli, sli);
+  
+  // Check for a block in the ideal list
+  if ((ctrl->sl_bitmap[*fli] & (1U << *sli)) == 0) {
+    // No block in the ideal list, find the next biggest
+    int fl = *fli;
+    int sl = *sli + 1;
     
-    // Check for a block in the ideal list
-    if ((ctrl->sl_bitmap[*fli] & (1U << *sli)) == 0) {
-        // No block in the ideal list, find the next biggest
-        int fl = *fli;
-        int sl = *sli + 1;
-        
-        // Find the next available SL slot in the current FL
-        uint32_t sl_map = ctrl->sl_bitmap[fl] & (~0U << sl);
-        if (sl_map == 0) {
-            // No available SL slots in the current FL, find the next FL
-            int fl_map = ctrl->fl_bitmap & (~0U << (fl + 1));
-            if (fl_map == 0) {
-                return NULL; // No suitable block found
-            }
-            *fli = ffs_generic(fl_map);
-            *sli = ffs_generic(ctrl->sl_bitmap[*fli]);
-        } else {
-            *sli = ffs_generic(sl_map);
-        }
+    // Find the next available SL slot in the current FL
+    uint32_t sl_map = ctrl->sl_bitmap[fl] & (~0U << sl);
+    if (sl_map == 0) {
+      // No available SL slots in the current FL, find the next FL
+      int fl_map = ctrl->fl_bitmap & (~0U << (fl + 1));
+      if (fl_map == 0) {
+        return NULL; // No suitable block found
+      }
+      *fli = ffs_generic(fl_map);
+      *sli = ffs_generic(ctrl->sl_bitmap[*fli]);
+    } else {
+      *sli = ffs_generic(sl_map);
     }
-    
-    return ctrl->blocks[*fli][*sli];
+  }
+  return ctrl->blocks[*fli][*sli];
 }
 
 static void remove_free_block_direct(mm_allocator_t* ctrl, tlsf_block_t* block, int fl, int sl) {
-    tlsf_block_t* prev = block->prev_free;
-    tlsf_block_t* next = block->next_free;
+  tlsf_block_t* prev = block->prev_free;
+  tlsf_block_t* next = block->next_free;
 
-    if (prev) {
-        prev->next_free = next;
-    } else {
-        ctrl->blocks[fl][sl] = next;
-    }
+  if (prev) {
+    prev->next_free = next;
+  } else {
+    ctrl->blocks[fl][sl] = next;
+  }
 
-    if (next) {
-        next->prev_free = prev;
-    }
+  if (next) {
+    next->prev_free = prev;
+  }
 
-    // If the list is now empty, update the bitmaps
-    if (!ctrl->blocks[fl][sl]) {
-        ctrl->sl_bitmap[fl] &= ~(1U << sl);
-        if (ctrl->sl_bitmap[fl] == 0) {
-            ctrl->fl_bitmap &= ~(1U << fl);
-        }
+  // If the list is now empty, update the bitmaps
+  if (!ctrl->blocks[fl][sl]) {
+    ctrl->sl_bitmap[fl] &= ~(1U << sl);
+    if (ctrl->sl_bitmap[fl] == 0) {
+      ctrl->fl_bitmap &= ~(1U << fl);
     }
+  }
 }
 
 static void remove_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
-    int fl, sl;
-    mapping(block_size(block), &fl, &sl);
-    remove_free_block_direct(ctrl, block, fl, sl);
+  int fl, sl;
+  mapping(block_size(block), &fl, &sl);
+  remove_free_block_direct(ctrl, block, fl, sl);
 }
 
 static void insert_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
-    int fl, sl;
-    mapping(block_size(block), &fl, &sl);
+  int fl, sl;
+  mapping(block_size(block), &fl, &sl);
     
-    tlsf_block_t* head = ctrl->blocks[fl][sl];
-    block->next_free = head;
-    block->prev_free = NULL;
+  tlsf_block_t* head = ctrl->blocks[fl][sl];
+  block->next_free = head;
+  block->prev_free = NULL;
 
-    if (head) {
-        head->prev_free = block;
-    }
+  if (head) { head->prev_free = block; }
     
-    ctrl->blocks[fl][sl] = block;
+  ctrl->blocks[fl][sl] = block;
 
-    // Update bitmaps
-    ctrl->sl_bitmap[fl] |= (1U << sl);
-    ctrl->fl_bitmap |= (1U << fl);
+  // Update bitmaps
+  ctrl->sl_bitmap[fl] |= (1U << sl);
+  ctrl->fl_bitmap |= (1U << fl);
 }
 
-static inline void* block_to_user(tlsf_block_t* block) {
-    return (void*)((char*)block + BLOCK_HEADER_OVERHEAD);
-}
+static inline void* block_to_user(tlsf_block_t* block) { return (void*)((char*)block + BLOCK_HEADER_OVERHEAD); }
 
-static inline tlsf_block_t* user_to_block(void* ptr) {
-    return (tlsf_block_t*)((char*)ptr - BLOCK_HEADER_OVERHEAD);
-}
+static inline tlsf_block_t* user_to_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_HEADER_OVERHEAD); }
 
 
 void mm_get_mapping_indices(size_t size, int* fl, int* sl) { mapping(size, fl, sl); }
@@ -872,9 +858,7 @@ void mm_print_heap_stats_inst(mm_allocator_t* allocator) {
   printf("Heap stats: free=%s allocated=%s\n", buf1, buf2);
 }
 
-void mm_print_free_list_inst(mm_allocator_t* allocator) {
-  (void)allocator; /* No-op simple implementation for tests */
-}
+void mm_print_free_list_inst(mm_allocator_t* allocator) { (void)allocator; /* No-op simple implementation for tests */ }
 
 size_t mm_get_free_space(void) { if (!sys_allocator) return 0; return mm_get_free_space_inst(sys_allocator); }
 size_t mm_get_total_allocated(void) { if (!sys_allocator) return 0; return mm_get_total_allocated_inst(sys_allocator); }
