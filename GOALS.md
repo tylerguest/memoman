@@ -8,12 +8,9 @@ These features are standard in serious TLSF implementations but currently missin
 - [x] **Aligned Allocation API (`mm_memalign`)**
   - **Goal**: Support arbitrary alignment requests (e.g., 4KB for pages, 64B for cache lines).
   - **Requirement**: Handle padding, gap filling, and potential splitting of the gap.
-  
-- [ ] **Discontiguous Pools (`mm_add_pool`)**
-  - **Goal**: Allow an allocator instance to manage multiple non-adjacent memory regions.
-  - **Current State**: `mm_create` assumes one contiguous block.
-  - **Requirement**: Refactor `mm_allocator_t` to decouple the control structure from the heap memory itself.
 
+- [x] **Discontiguous Pools (`mm_add_pool`)**
+  - **Goal**: Allow an allocator instance to manage multiple non-adjacent memory regions.
 - [ ] **Portability & Architecture Support**
   - **Goal**: Support 32-bit systems automatically.
   - **Current State**: Hardcoded 8-byte alignment and 64-bit assumptions.
