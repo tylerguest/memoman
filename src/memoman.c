@@ -25,26 +25,12 @@ static inline void block_set_used(tlsf_block_t* block) { block->size &= ~TLSF_BL
 static inline void block_set_prev_free(tlsf_block_t* block) { block->size |= TLSF_PREV_FREE; }
 static inline void block_set_prev_used(tlsf_block_t* block) { block->size &= ~TLSF_PREV_FREE; }
 
-static inline void block_set_magic(tlsf_block_t* block) {
-#ifdef DEBUG_OUTPUT
-  block->magic = TLSF_BLOCK_MAGIC;
-#else
-  (void)block;
-#endif
+static inline tlsf_block_t* block_prev(tlsf_block_t* block) {
+  return *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*)));
 }
-
-static inline int block_check_magic(tlsf_block_t* block) {
-#ifdef DEBUG_OUTPUT
-  return block->magic == TLSF_BLOCK_MAGIC;
-#else
-  (void)block;
-  return 1;
-#endif
+static inline void block_set_prev(tlsf_block_t* block, tlsf_block_t* prev) {
+  *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*))) = prev;
 }
-
-static inline tlsf_block_t* block_prev(tlsf_block_t* block) { return *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*))); }
-
-static inline void block_set_prev(tlsf_block_t* block, tlsf_block_t* prev) { *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*))) = prev; }
 
 static inline void mapping(size_t size, int* fli, int* sli) {
   int fl, sl;
@@ -134,16 +120,17 @@ static void insert_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
   ctrl->current_free_size += block_size(block);
 }
 
-static inline void* block_to_user(tlsf_block_t* block) { return (void*)((char*)block + BLOCK_HEADER_OVERHEAD); }
-
-static inline tlsf_block_t* user_to_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_HEADER_OVERHEAD); }
+static inline void* block_to_user(tlsf_block_t* block) { return (void*)((char*)block + BLOCK_START_OFFSET); }
+static inline tlsf_block_t* user_to_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_START_OFFSET); }
 
 
 void mm_get_mapping_indices(size_t size, int* fl, int* sl) { mapping(size, fl, sl); }
 
 
 static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* block) {
-  tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + block_size(block));
+  size_t sz = block_size(block);
+  if (sz == 0) return NULL; /* epilogue */
+  tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
   /* With discontiguous pools, we rely on sentinel blocks (size 0) to stop iteration. */
   (void)ctrl;
   return next;
@@ -151,6 +138,11 @@ static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* 
 
 static inline void block_mark_as_free(mm_allocator_t* ctrl, tlsf_block_t* block) {
   block_set_free(block);
+#ifdef MM_DEBUG
+  size_t sz = block_size(block);
+  assert(sz >= TLSF_MIN_BLOCK_SIZE);
+  assert(sz <= ctrl->total_pool_size);
+#endif
   tlsf_block_t* next = block_next_safe(ctrl, block);
   if (next) {
     block_set_prev_free(next);
@@ -161,15 +153,14 @@ static inline void block_mark_as_free(mm_allocator_t* ctrl, tlsf_block_t* block)
 
 static inline tlsf_block_t* split_block(mm_allocator_t* ctrl, tlsf_block_t* block, size_t size) {
   size_t block_total_size = block_size(block);
-  size_t min_split_size = TLSF_MIN_BLOCK_SIZE + BLOCK_HEADER_OVERHEAD;
+  size_t min_split_size = size + BLOCK_HEADER_OVERHEAD + TLSF_MIN_BLOCK_SIZE;
 
-  if (block_total_size < size + min_split_size) return NULL;
+  if (block_total_size < min_split_size) return NULL;
 
   size_t remainder_size = block_total_size - size - BLOCK_HEADER_OVERHEAD;
   block_set_size(block, size);
 
   tlsf_block_t* remainder = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + size);
-  block_set_magic(remainder);
   block_set_size(remainder, remainder_size);
   block_set_free(remainder);
   block_set_prev_used(remainder); // The block before remainder is now used
@@ -215,19 +206,6 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
   return block;
 }
 
-static void create_free_block(mm_allocator_t* ctrl, void* start, size_t size) {
-  if (size < BLOCK_HEADER_OVERHEAD + TLSF_MIN_BLOCK_SIZE) return;
-
-  tlsf_block_t* block = (tlsf_block_t*)start;
-  size_t block_data_size = size - BLOCK_HEADER_OVERHEAD;
-  block_set_magic(block);
-  block_set_size(block, block_data_size);
-  block_set_free(block);
-
-  block = coalesce(ctrl, block);
-  insert_free_block(ctrl, block);
-}
-
 
 int mm_validate_inst(mm_allocator_t* ctrl) {
   if (!ctrl) return 0;
@@ -258,7 +236,6 @@ int mm_validate_inst(mm_allocator_t* ctrl) {
         CHECK(block_is_free(walk), "Used block found in free list");
         CHECK(walk->prev_free == list_prev, "Free list prev pointer broken");
         CHECK((block_size(walk) % ALIGNMENT) == 0, "Free block size unaligned");
-        CHECK(block_check_magic(walk), "Free block magic corrupted");
         
         /* Size Mapping Check */
         int mapped_fl, mapped_sl;
@@ -320,29 +297,27 @@ int mm_add_pool(mm_allocator_t* allocator, void* mem, size_t bytes) {
 
   /* 1. Create Prologue */
   tlsf_block_t* prologue = (tlsf_block_t*)pool_start;
-  block_set_size(prologue, 0);
+  block_set_size(prologue, 0); /* Minimal prologue: only the size word exists */
   block_set_used(prologue);
   block_set_prev_used(prologue);
-  block_set_magic(prologue);
 
   /* 2. Create Epilogue */
-  tlsf_block_t* epilogue = (tlsf_block_t*)(pool_end - BLOCK_HEADER_OVERHEAD);
+  tlsf_block_t* epilogue = (tlsf_block_t*)(pool_end - BLOCK_START_OFFSET);
   block_set_size(epilogue, 0);
   block_set_used(epilogue);
   block_set_prev_free(epilogue);
-  block_set_magic(epilogue);
 
   /* 3. Create Main Free Block */
-  char* middle_start = pool_start + BLOCK_HEADER_OVERHEAD;
-  size_t middle_size = (char*)epilogue - middle_start;
+  tlsf_block_t* block = (tlsf_block_t*)(pool_start + BLOCK_START_OFFSET);
+  size_t size = (char*)epilogue - (char*)block - BLOCK_HEADER_OVERHEAD;
   
-  tlsf_block_t* block = (tlsf_block_t*)middle_start;
-  block->size = 0; /* Initialize flags */
-  block_set_prev_used(block); /* Prologue is used */
+  block_set_size(block, size);
+  block_set_free(block);
+  block_set_prev_used(block);
+  block_set_prev(block, prologue);
   block_set_prev(epilogue, block);
   
-  create_free_block(allocator, middle_start, middle_size);
-  
+  insert_free_block(allocator, block);
   allocator->total_pool_size += aligned_bytes;
   
   return 1;
@@ -384,9 +359,6 @@ void mm_free_inst(mm_allocator_t* ctrl, void* ptr) {
   }
 
   tlsf_block_t* block = user_to_block(ptr);
-  if (!block_check_magic(block)) {
-    return;
-  }
 
   if (block_is_free(block)) {
     /* Double free detected: do nothing, but optionally log for debug */
@@ -418,7 +390,6 @@ static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
     if ((uintptr_t)ptr % ALIGNMENT != 0) return -1;
 
     tlsf_block_t* block = user_to_block(ptr);
-    if (!block_check_magic(block)) return -1;
 
     size_t current_size = block_size(block);
     if (size < TLSF_MIN_BLOCK_SIZE) size = TLSF_MIN_BLOCK_SIZE;
@@ -526,12 +497,10 @@ void* mm_memalign_inst(mm_allocator_t* ctrl, size_t alignment, size_t size) {
       /* Create prefix free block (reuse original header) */
       size_t prefix_data = (size_t)prefix_bytes - BLOCK_HEADER_OVERHEAD;
       block_set_size(block, prefix_data);
-      block_set_magic(block);
       block_set_free(block);
       /* Aligned block follows prefix */
       aligned_block = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + block_size(block));
       /* Setup aligned block header */
-      block_set_magic(aligned_block);
       size_t aligned_data = orig_size - ((size_t)prefix_bytes);
       block_set_size(aligned_block, aligned_data);
       /* The aligned block now has previous free */
@@ -580,7 +549,6 @@ size_t mm_get_usable_size(mm_allocator_t* allocator, void* ptr) {
   /* Main heap blocks */
   if ((uintptr_t)ptr % ALIGNMENT != 0) return 0;
   tlsf_block_t* block = user_to_block(ptr);
-  if (!block_check_magic(block)) return 0;
   if (block_is_free(block)) return 0;
   return block_size(block);
 }

@@ -6,7 +6,7 @@ This document tracks the remaining work to make memoman a production-grade TLSF 
 
 Before adding features, make sure your layout + invariants match the reference model.
 
-- [ ] **Block layout matches TLSF 3.1 semantics**
+- [x] **Block layout matches TLSF 3.1 semantics**
   - **Goal**: Keep “user data starts right after size” semantics (Conte’s block_start_offset).
   - **Requirement**: Ensure your “free-list pointers live in user payload when block is free” behavior is always valid.
   - **Deliverable**: Document the exact header/payload layout with an ASCII diagram in memoman.h.
