@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 199309L
-#include "../src/memoman.h"
+#include "test_framework.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>

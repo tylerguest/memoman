@@ -1,10 +1,8 @@
 #include "test_framework.h"
-#include "../src/memoman.h"
 
 static int test_stats_print(void) {
   char* ptr1 = (char*)mm_malloc(100);
   ASSERT_NOT_NULL(ptr1);
-  mm_print_heap_stats();
   mm_get_total_allocated();
   mm_get_free_space();
   return 1;

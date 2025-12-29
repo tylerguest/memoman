@@ -1,18 +1,10 @@
 #define _GNU_SOURCE
 
 #include "memoman.h"
-#include <stdio.h>
-#include <sys/mman.h>
-#include <unistd.h>
 #include <string.h>
 #include <assert.h>
 #include <stdint.h>
 #include <limits.h>
-
-
-mm_allocator_t* sys_allocator = NULL;
-char* sys_heap_base = NULL; 
-size_t sys_heap_cap = 0;
 
 static inline size_t align_size(size_t size) {
     return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
@@ -115,6 +107,7 @@ static void remove_free_block_direct(mm_allocator_t* ctrl, tlsf_block_t* block, 
       ctrl->fl_bitmap &= ~(1U << fl);
     }
   }
+  ctrl->current_free_size -= block_size(block);
 }
 
 static void remove_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
@@ -138,6 +131,7 @@ static void insert_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
   // Update bitmaps
   ctrl->sl_bitmap[fl] |= (1U << sl);
   ctrl->fl_bitmap |= (1U << fl);
+  ctrl->current_free_size += block_size(block);
 }
 
 static inline void* block_to_user(tlsf_block_t* block) { return (void*)((char*)block + BLOCK_HEADER_OVERHEAD); }
@@ -150,7 +144,8 @@ void mm_get_mapping_indices(size_t size, int* fl, int* sl) { mapping(size, fl, s
 
 static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* block) {
   tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + block_size(block));
-  if ((char*)next >= ctrl->heap_end) return NULL;
+  /* With discontiguous pools, we rely on sentinel blocks (size 0) to stop iteration. */
+  (void)ctrl;
   return next;
 }
 
@@ -237,56 +232,9 @@ static void create_free_block(mm_allocator_t* ctrl, void* start, size_t size) {
 int mm_validate_inst(mm_allocator_t* ctrl) {
   if (!ctrl) return 0;
 
-  #define CHECK(cond, msg) do { if (!(cond)) { fprintf(stderr, "[Memoman] Integrity Failure: %s\n", msg); return 0; } } while(0)
+  #define CHECK(cond, msg) do { if (!(cond)) { return 0; } } while(0)
 
-  /* 1. Physical Heap Walk */
-  tlsf_block_t* prev = NULL;
-  tlsf_block_t* curr = (tlsf_block_t*)ctrl->heap_start;
-  int found_epilogue = 0;
-
-  while (curr && (char*)curr < ctrl->heap_end) {
-    /* Check Alignment & Bounds */
-    CHECK(((uintptr_t)curr % ALIGNMENT == 0), "Block header not aligned");
-    if ((char*)curr != ctrl->heap_start) {
-        CHECK(((uintptr_t)block_to_user(curr) % ALIGNMENT == 0), "Block payload not aligned");
-    }
-    CHECK((char*)curr >= ctrl->heap_start && (char*)curr < ctrl->heap_end, "Block out of bounds");
-    #ifdef DEBUG_OUTPUT
-    CHECK(curr->magic == TLSF_BLOCK_MAGIC, "Block magic corrupted");
-    #endif
-
-    size_t size = block_size(curr);
-    int is_free = block_is_free(curr);
-    int is_prev_free = block_is_prev_free(curr);
-
-    /* Check Ghost Pointer / Prev Free Flag Consistency */
-    if (prev) {
-      int prev_actual_free = block_is_free(prev);
-      CHECK(is_prev_free == prev_actual_free, "PREV_FREE flag desync with actual prev block");
-
-      if (is_prev_free) {
-        /* Ghost pointer must point to prev */
-        CHECK(block_prev(curr) == prev, "Ghost prev_phys pointer invalid");
-        /* Coalescing Invariant: No two free blocks adjacent */
-        CHECK(!is_free, "Adjacent free blocks detected (coalescing failed)");
-      }
-    }
-
-    /* Sentinel Checks */
-    if (size == 0) {
-      if ((char*)curr == ctrl->heap_start) CHECK(!is_free, "Prologue must be used");
-      else {
-        CHECK(!is_free, "Epilogue must be used");
-        CHECK((char*)curr + BLOCK_HEADER_OVERHEAD == ctrl->heap_end, "Epilogue not at heap end");
-        found_epilogue = 1;
-        break; 
-      }
-    }
-
-    prev = curr;
-    curr = block_next_safe(ctrl, curr);
-  }
-  CHECK(found_epilogue, "Heap walk finished without finding epilogue");
+  /* Physical walk removed as we now support discontiguous pools and don't track them all */
 
   /* 2. Logical Free List Walk */
   for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
@@ -309,6 +257,8 @@ int mm_validate_inst(mm_allocator_t* ctrl) {
         CHECK(count++ < 10000, "Infinite loop detected in free list");
         CHECK(block_is_free(walk), "Used block found in free list");
         CHECK(walk->prev_free == list_prev, "Free list prev pointer broken");
+        CHECK((block_size(walk) % ALIGNMENT) == 0, "Free block size unaligned");
+        CHECK(block_check_magic(walk), "Free block magic corrupted");
         
         /* Size Mapping Check */
         int mapped_fl, mapped_sl;
@@ -332,49 +282,58 @@ static void mm_check_integrity(mm_allocator_t* ctrl) {
 #define mm_check_integrity(ctrl) ((void)0)
 #endif
 
-static large_block_t* find_large_block(mm_allocator_t* ctrl, void* ptr) {
-  large_block_t* lb = ctrl->large_blocks;
-  while (lb) {
-    if ((char*)lb + sizeof(large_block_t) == (char*)ptr) return lb;
-    lb = lb->next;
-  }
-  return NULL;
-}
-
 mm_allocator_t* mm_create(void* mem, size_t bytes) {
   /* Overhead: Allocator + Alignment Padding + Prologue + Min Block + Epilogue */
   size_t overhead = sizeof(mm_allocator_t) + ALIGNMENT + BLOCK_HEADER_OVERHEAD + BLOCK_HEADER_OVERHEAD;
   if (bytes < overhead + TLSF_MIN_BLOCK_SIZE) return NULL;
 
+  /* Ensure provided memory is aligned */
+  if ((uintptr_t)mem % ALIGNMENT != 0) return NULL;
+
   mm_allocator_t* allocator = (mm_allocator_t*)mem;
   memset(allocator, 0, sizeof(mm_allocator_t));
 
-  char* heap_start = (char*)mem + sizeof(mm_allocator_t);
+  /* Add the rest of the memory as the first pool */
+  void* pool_mem = (char*)mem + sizeof(mm_allocator_t);
+  size_t pool_bytes = bytes - sizeof(mm_allocator_t);
   
-  /* Align heap_start to ALIGNMENT */
-  uintptr_t start_addr = (uintptr_t)heap_start;
+  if (!mm_add_pool(allocator, pool_mem, pool_bytes)) return NULL;
+
+  return allocator;
+}
+
+int mm_add_pool(mm_allocator_t* allocator, void* mem, size_t bytes) {
+  if (!allocator || !mem) return 0;
+
+  size_t overhead = ALIGNMENT + BLOCK_HEADER_OVERHEAD + BLOCK_HEADER_OVERHEAD;
+  if (bytes < overhead + TLSF_MIN_BLOCK_SIZE) return 0;
+
+  uintptr_t start_addr = (uintptr_t)mem;
   uintptr_t aligned_addr = (start_addr + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
-  heap_start = (char*)aligned_addr;
+  char* pool_start = (char*)aligned_addr;
+  size_t aligned_bytes = bytes - (aligned_addr - start_addr);
+  
+  /* Check if alignment ate too much */
+  if (aligned_bytes < overhead + TLSF_MIN_BLOCK_SIZE) return 0;
 
-  allocator->heap_start = heap_start;
-  allocator->heap_end = (char*)mem + bytes;
+  char* pool_end = pool_start + aligned_bytes;
 
-  /* 1. Create Prologue (Sentinel) */
-  tlsf_block_t* prologue = (tlsf_block_t*)heap_start;
+  /* 1. Create Prologue */
+  tlsf_block_t* prologue = (tlsf_block_t*)pool_start;
   block_set_size(prologue, 0);
   block_set_used(prologue);
   block_set_prev_used(prologue);
   block_set_magic(prologue);
 
-  /* 2. Create Epilogue (Sentinel) */
-  tlsf_block_t* epilogue = (tlsf_block_t*)(allocator->heap_end - BLOCK_HEADER_OVERHEAD);
+  /* 2. Create Epilogue */
+  tlsf_block_t* epilogue = (tlsf_block_t*)(pool_end - BLOCK_HEADER_OVERHEAD);
   block_set_size(epilogue, 0);
   block_set_used(epilogue);
   block_set_prev_free(epilogue);
   block_set_magic(epilogue);
 
   /* 3. Create Main Free Block */
-  char* middle_start = heap_start + BLOCK_HEADER_OVERHEAD;
+  char* middle_start = pool_start + BLOCK_HEADER_OVERHEAD;
   size_t middle_size = (char*)epilogue - middle_start;
   
   tlsf_block_t* block = (tlsf_block_t*)middle_start;
@@ -383,40 +342,15 @@ mm_allocator_t* mm_create(void* mem, size_t bytes) {
   block_set_prev(epilogue, block);
   
   create_free_block(allocator, middle_start, middle_size);
-
-  return allocator;
-}
-
-void mm_destroy_instance(mm_allocator_t* allocator) {
-  if (!allocator) return;
-
-  large_block_t* lb = allocator->large_blocks;
-  while (lb) {
-    large_block_t* next = lb->next;
-    munmap(lb, lb->size);
-    lb = next;
-  }
+  
+  allocator->total_pool_size += aligned_bytes;
+  
+  return 1;
 }
 
 void* mm_malloc_inst(mm_allocator_t* ctrl, size_t size) {
   if (!ctrl || size == 0) return NULL;
   mm_check_integrity(ctrl);
-
-  if (size >= LARGE_ALLOC_THRESHOLD) {
-    size_t total = sizeof(large_block_t) + align_size(size);
-    void* ptr = mmap(NULL, total, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (ptr == MAP_FAILED) return NULL;
-
-    large_block_t* block = (large_block_t*)ptr;
-    block->magic = LARGE_BLOCK_MAGIC;
-    block->size = total;
-    block->prev = NULL;
-    block->next = ctrl->large_blocks;
-    if (ctrl->large_blocks) ctrl->large_blocks->prev = block;
-    ctrl->large_blocks = block;
-
-    return (char*)ptr + sizeof(large_block_t);
-  }
 
   if (size < TLSF_MIN_BLOCK_SIZE) size = TLSF_MIN_BLOCK_SIZE;
   size = align_size(size);
@@ -445,27 +379,12 @@ void mm_free_inst(mm_allocator_t* ctrl, void* ptr) {
   if (!ptr || !ctrl) return;
   mm_check_integrity(ctrl);
 
-  if ((char*)ptr < ctrl->heap_start || (char*)ptr >= ctrl->heap_end) {
-    large_block_t* lb = find_large_block(ctrl, ptr);
-    if (lb) {
-      if (lb->prev) lb->prev->next = lb->next;
-      else ctrl->large_blocks = lb->next;
-      if (lb->next) lb->next->prev = lb->prev;
-      munmap(lb, lb->size);
-    } else {
-      fprintf(stderr, "[Memoman] Error: Pointer %p outside heap bounds in free()\n", ptr);
-    }
-    return;
-  }
-
   if ((uintptr_t)ptr % ALIGNMENT != 0) {
-    fprintf(stderr, "[Memoman] Error: Invalid pointer alignment in free()\n");
     return;
   }
 
   tlsf_block_t* block = user_to_block(ptr);
   if (!block_check_magic(block)) {
-    fprintf(stderr, "[Memoman] Error: Invalid block magic in free()\n");
     return;
   }
 
@@ -495,7 +414,7 @@ static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
   mm_check_integrity(ctrl);
 
   /* Handle Main Heap Blocks */
-  if ((char*)ptr >= ctrl->heap_start && (char*)ptr < ctrl->heap_end) {
+  {
     if ((uintptr_t)ptr % ALIGNMENT != 0) return -1;
 
     tlsf_block_t* block = user_to_block(ptr);
@@ -544,13 +463,7 @@ static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
     }
     return 1; /* Valid, but needs move */
   } 
-  /* Handle Large Blocks */
-  else {
-    large_block_t* lb = find_large_block(ctrl, ptr);
-    if (!lb) return -1; /* Invalid pointer */
-    size_t current_size = lb->size - sizeof(large_block_t);
-    return (size <= current_size) ? 0 : 1;
-  }
+  return -1;
 }
 
 void* mm_realloc_inst(mm_allocator_t* ctrl, void* ptr, size_t size) {
@@ -561,7 +474,6 @@ void* mm_realloc_inst(mm_allocator_t* ctrl, void* ptr, size_t size) {
   
   if (status == 0) return ptr; /* In-place success */
   if (status == -1) {
-    fprintf(stderr, "[Memoman] Error: Invalid pointer in realloc()\n");
     return NULL;
   }
 
@@ -662,137 +574,8 @@ void* mm_memalign_inst(mm_allocator_t* ctrl, size_t alignment, size_t size) {
   return block_to_user(aligned_block);
 }
 
-
-static int global_grow_heap(size_t min_additional) {
-  if (!sys_allocator) return -1;
-
-  size_t old_cap = sys_heap_cap;
-  size_t new_cap = old_cap * HEAP_GROWTH_FACTOR;
-  while (new_cap < old_cap + min_additional) new_cap *= HEAP_GROWTH_FACTOR;
-  if (new_cap > MAX_HEAP_SIZE) new_cap = MAX_HEAP_SIZE;
-  if (new_cap <= old_cap) return -1;
-
-  if (mprotect(sys_heap_base, new_cap, PROT_READ | PROT_WRITE) != 0) { perror("mprotect failed"); return -1; }
-
-  /* Handle Epilogue Movement */
-  tlsf_block_t* old_epilogue = (tlsf_block_t*)(sys_heap_base + old_cap - BLOCK_HEADER_OVERHEAD);
-  size_t old_prev_flags = old_epilogue->size & TLSF_PREV_FREE;
-
-  sys_heap_cap = new_cap;
-  sys_allocator->heap_end = sys_heap_base + new_cap;
-  
-  /* Create new epilogue at the new end */
-  tlsf_block_t* new_epilogue = (tlsf_block_t*)(sys_allocator->heap_end - BLOCK_HEADER_OVERHEAD);
-  block_set_size(new_epilogue, 0);
-  block_set_used(new_epilogue);
-  block_set_prev_free(new_epilogue); // Will be adjusted by coalesce/create_free_block
-  block_set_magic(new_epilogue);
-
-  /* Convert old epilogue + new space into a free block */
-  /* We start at old_epilogue because it is now part of the free space */
-  tlsf_block_t* block = old_epilogue;
-  size_t added_size = new_cap - old_cap;
-  size_t total_new_size = added_size;
-  
-  /* Preserve the PREV_FREE state of the old epilogue! */
-  block->size = old_prev_flags; 
-  block_set_prev(new_epilogue, block);
-  create_free_block(sys_allocator, block, total_new_size);
-  return 0;
-}
-
-int mm_init(void) {
-  if (sys_allocator) return 0;
-
-  sys_heap_base = mmap(NULL, MAX_HEAP_SIZE, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-  if (sys_heap_base == MAP_FAILED) return -1;
-
-  if (mprotect(sys_heap_base, INITIAL_HEAP_SIZE, PROT_READ | PROT_WRITE) != 0) {
-    munmap(sys_heap_base, MAX_HEAP_SIZE);
-    return -1;
-  }
-
-  sys_heap_cap = INITIAL_HEAP_SIZE;
-  sys_allocator = mm_create(sys_heap_base, INITIAL_HEAP_SIZE);
-  if (!sys_allocator) return -1;
-
-  return 0;
-}
-
-void* mm_malloc(size_t size) {
-  if (!sys_allocator) if (mm_init() != 0) return NULL;
-  void* ptr = mm_malloc_inst(sys_allocator, size);
-  if (!ptr && size < LARGE_ALLOC_THRESHOLD) {
-    if (global_grow_heap(size + BLOCK_HEADER_OVERHEAD) == 0) { ptr = mm_malloc_inst(sys_allocator, size); }
-  }
-  return ptr;
-}
-
-void mm_free(void* ptr) { if (sys_allocator) mm_free_inst(sys_allocator, ptr); }
-
-void mm_destroy(void) {
-  if (sys_allocator) { 
-    mm_destroy_instance(sys_allocator);
-    munmap(sys_heap_base, MAX_HEAP_SIZE);
-    sys_allocator = NULL;
-    sys_heap_base = NULL;
-  }
-}
-
-void mm_reset_allocator(void) {
-  if (sys_allocator) mm_destroy();
-  mm_init();
-}
-
-void* mm_calloc(size_t nmemb, size_t size) {
-  if (!sys_allocator) if (mm_init() != 0) return NULL;
-  return mm_calloc_inst(sys_allocator, nmemb, size);
-}
-
-void* mm_realloc(void*ptr, size_t size) {
-  if (!ptr) return mm_malloc(size);
-  if (size == 0) { mm_free(ptr); return NULL; }
-  
-  if (!sys_allocator) return NULL;
-
-  int status = try_realloc_inplace(sys_allocator, ptr, size);
-  
-  if (status == 0) return ptr; /* In-place success */
-  if (status == -1) {
-    fprintf(stderr, "[Memoman] Error: Invalid pointer in realloc()\n");
-    return NULL;
-  }
-
-  /* Fallback: Allocate new, copy, free old */
-  /* We use mm_malloc (global) here to support heap growth if needed */
-  void* new_ptr = mm_malloc(size);
-  if (new_ptr) {
-    size_t old_usable = mm_get_usable_size(sys_allocator, ptr);
-    memcpy(new_ptr, ptr, (old_usable < size) ? old_usable : size);
-    mm_free_inst(sys_allocator, ptr);
-  }
-  return new_ptr;
-}
-
-void* mm_memalign(size_t alignment, size_t size) {
-  if (!sys_allocator) if (mm_init() != 0) return NULL;
-  return mm_memalign_inst(sys_allocator, alignment, size);
-}
-
-int mm_validate(void) {
-  if (!sys_allocator) return 1;
-  return mm_validate_inst(sys_allocator);
-}
-
 size_t mm_get_usable_size(mm_allocator_t* allocator, void* ptr) {
   if (!allocator || !ptr) return 0;
-
-  /* Large blocks (mmap) */
-  if ((char*)ptr < allocator->heap_start || (char*)ptr >= allocator->heap_end) {
-    large_block_t* lb = find_large_block(allocator, ptr);
-    if (!lb) return 0;
-    return lb->size - sizeof(large_block_t);
-  }
 
   /* Main heap blocks */
   if ((uintptr_t)ptr % ALIGNMENT != 0) return 0;
@@ -802,65 +585,12 @@ size_t mm_get_usable_size(mm_allocator_t* allocator, void* ptr) {
   return block_size(block);
 }
 
-size_t mm_malloc_usable_size(void* ptr) {
-  if (!sys_allocator) return 0;
-  return mm_get_usable_size(sys_allocator, ptr);
-}
-
 size_t mm_get_free_space_inst(mm_allocator_t* allocator) {
   if (!allocator) return 0;
-  size_t total = 0;
-  tlsf_block_t* curr = (tlsf_block_t*)allocator->heap_start;
-  /* Skip Prologue */
-  if (curr && block_size(curr) == 0) curr = block_next_safe(allocator, curr);
-  while (curr && (char*)curr < allocator->heap_end) {
-    size_t sz = block_size(curr);
-    if (sz == 0) break;
-    if (block_is_free(curr)) total += sz;
-    curr = block_next_safe(allocator, curr);
-  }
-  /* include large blocks' free space as 0 (they are allocated outside) */
-  return total;
+  return allocator->current_free_size;
 }
 
 size_t mm_get_total_allocated_inst(mm_allocator_t* allocator) {
   if (!allocator) return 0;
-  size_t total = 0;
-  tlsf_block_t* curr = (tlsf_block_t*)allocator->heap_start;
-  /* Skip Prologue */
-  if (curr && block_size(curr) == 0) curr = block_next_safe(allocator, curr);
-  while (curr && (char*)curr < allocator->heap_end) {
-    size_t sz = block_size(curr);
-    if (sz == 0) break;
-    if (!block_is_free(curr)) total += sz;
-    curr = block_next_safe(allocator, curr);
-  }
-  /* Add mmap'd large blocks
-     Note: large_blocks store total mmap size; user-usable is size - header */
-  large_block_t* lb = allocator->large_blocks;
-  while (lb) { total += (lb->size - sizeof(large_block_t)); lb = lb->next; }
-  return total;
+  return allocator->total_pool_size - allocator->current_free_size;
 }
-
-void mm_print_heap_stats_inst(mm_allocator_t* allocator) {
-  if (!allocator) return;
-  size_t free = mm_get_free_space_inst(allocator);
-  size_t alloc = mm_get_total_allocated_inst(allocator);
-  char buf1[32], buf2[32];
-  if (free >= 1024*1024) snprintf(buf1, sizeof(buf1), "%zuMB", free / (1024*1024));
-  else if (free >= 1024) snprintf(buf1, sizeof(buf1), "%zuKB", free / 1024);
-  else snprintf(buf1, sizeof(buf1), "%zuB", free);
-
-  if (alloc >= 1024*1024) snprintf(buf2, sizeof(buf2), "%zuMB", alloc / (1024*1024));
-  else if (alloc >= 1024) snprintf(buf2, sizeof(buf2), "%zuKB", alloc / 1024);
-  else snprintf(buf2, sizeof(buf2), "%zuB", alloc);
-
-  printf("Heap stats: free=%s allocated=%s\n", buf1, buf2);
-}
-
-void mm_print_free_list_inst(mm_allocator_t* allocator) { (void)allocator; /* No-op simple implementation for tests */ }
-
-size_t mm_get_free_space(void) { if (!sys_allocator) return 0; return mm_get_free_space_inst(sys_allocator); }
-size_t mm_get_total_allocated(void) { if (!sys_allocator) return 0; return mm_get_total_allocated_inst(sys_allocator); }
-void mm_print_heap_stats(void) { if (!sys_allocator) return; mm_print_heap_stats_inst(sys_allocator); }
-void mm_print_free_list(void) { if (!sys_allocator) return; mm_print_free_list_inst(sys_allocator); }

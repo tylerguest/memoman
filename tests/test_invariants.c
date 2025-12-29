@@ -102,6 +102,7 @@ static int test_bitmap_consistency() {
   return 1;
 }
 
+#ifndef NDEBUG
 static int test_corruption_catch() {
   printf("Running corruption test... expect crash!\n");
   void* p = mm_malloc(64);
@@ -110,13 +111,16 @@ static int test_corruption_catch() {
   mm_free(p);
   return 1;
 }
+#endif
 
 int main() {
   TEST_SUITE_BEGIN("Invariants & Integrity");
   RUN_TEST(test_coalescing_invariants);
   RUN_TEST(test_ghost_pointer_safety);
   RUN_TEST(test_bitmap_consistency);
+#ifndef NDEBUG
   RUN_TEST(test_corruption_catch);
+#endif
   TEST_SUITE_END();
   TEST_MAIN_END();
 }

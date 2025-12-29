@@ -25,7 +25,6 @@ static int test_calloc_inst_basic() {
     ASSERT_EQ(arr[i], 0);
   }
 
-  mm_destroy_instance(alloc);
   return 1;
 }
 
@@ -37,7 +36,6 @@ static int test_calloc_inst_overflow() {
   void* p = mm_calloc_inst(alloc, SIZE_MAX, 2);
   ASSERT_NULL(p);
 
-  mm_destroy_instance(alloc);
   return 1;
 }
 
@@ -64,7 +62,6 @@ static int test_realloc_inst_growth() {
   ASSERT_GE(p_addr, buf_addr);
   ASSERT_LT(p_addr, buf_addr + sizeof(buffer));
 
-  mm_destroy_instance(alloc);
   return 1;
 }
 
@@ -86,7 +83,6 @@ static int test_realloc_inst_oom() {
   /* Original pointer should still be valid */
   mm_free_inst(alloc, p);
   
-  mm_destroy_instance(alloc);
   return 1;
 }
 
@@ -108,7 +104,6 @@ static int test_realloc_inst_inplace() {
   /* Should have coalesced and returned same pointer */
   ASSERT_EQ(p3, p1);
 
-  mm_destroy_instance(alloc);
   return 1;
 }
 

@@ -24,7 +24,6 @@ static int test_stack_pool() {
   
   /* 3. Free and Destroy */
   mm_free_inst(alloc, p1);
-  mm_destroy_instance(alloc);
   
   /* Stack buffer is automatically reclaimed, no leaks */
   return 1;
@@ -62,34 +61,8 @@ static int test_multiple_pools() {
   ASSERT_LT(p2_addr, mem2_addr + pool_size);
   
   /* 3. Cleanup */
-  mm_destroy_instance(a1);
-  mm_destroy_instance(a2);
-  
   free(mem1);
   free(mem2);
-  return 1;
-}
-
-static int test_large_block_cleanup() {
-  /* Create a small pool */
-  uint8_t buffer[16384] __attribute__((aligned(16)));
-  mm_allocator_t* alloc = mm_create(buffer, sizeof(buffer));
-  ASSERT_NOT_NULL(alloc);
-
-  /* Alloc something larger than the pool (triggers mmap) */
-  size_t large_sz = 2 * 1024 * 1024;
-  void* p = mm_malloc_inst(alloc, large_sz);
-  ASSERT_NOT_NULL(p);
-  
-  /* Verify it's NOT in the buffer */
-  uintptr_t p_addr = (uintptr_t)p;
-  uintptr_t buf_addr = (uintptr_t)buffer;
-  int in_buffer = (p_addr >= buf_addr) && (p_addr < buf_addr + sizeof(buffer));
-  ASSERT(!in_buffer);
-  
-  /* Destroy instance should munmap the large block */
-  mm_destroy_instance(alloc);
-  
   return 1;
 }
 
@@ -97,7 +70,6 @@ int main() {
   TEST_SUITE_BEGIN("Allocator Lifecycle");
   RUN_TEST(test_stack_pool);
   RUN_TEST(test_multiple_pools);
-  RUN_TEST(test_large_block_cleanup);
   TEST_SUITE_END();
   TEST_MAIN_END();
 }

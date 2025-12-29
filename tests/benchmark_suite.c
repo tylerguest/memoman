@@ -37,8 +37,29 @@ void sys_init_stub(void) {}
 void sys_destroy_stub(void) {}
 
 /* Wrappers for Memoman */
-void mm_init_wrapper(void) { mm_init(); }
-void mm_destroy_wrapper(void) { mm_destroy(); }
+static mm_allocator_t* bench_allocator = NULL;
+static void* bench_pool = NULL;
+#define BENCH_POOL_SIZE (1024 * 1024 * 1024) /* 1GB */
+
+void mm_init_wrapper(void) {
+    bench_pool = malloc(BENCH_POOL_SIZE);
+    if (!bench_pool) { perror("malloc failed"); exit(1); }
+    bench_allocator = mm_create(bench_pool, BENCH_POOL_SIZE);
+}
+
+void mm_destroy_wrapper(void) {
+    free(bench_pool);
+    bench_pool = NULL;
+    bench_allocator = NULL;
+}
+
+void* mm_malloc_wrapper(size_t size) {
+    return mm_malloc_inst(bench_allocator, size);
+}
+
+void mm_free_wrapper(void* ptr) {
+    mm_free_inst(bench_allocator, ptr);
+}
 
 /* Timing Utils */
 double get_time_sec() {
@@ -209,7 +230,7 @@ int main(void) {
     };
     
     allocator_vtable_t memoman_alloc = { 
-        "Memoman", mm_malloc, mm_free, mm_init_wrapper, mm_destroy_wrapper 
+        "Memoman", mm_malloc_wrapper, mm_free_wrapper, mm_init_wrapper, mm_destroy_wrapper 
     };
     
     run_suite(&system_alloc);

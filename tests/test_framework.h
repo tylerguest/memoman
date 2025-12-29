@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../src/memoman.h"
 
 /* ANSI Color Codes */
 #define COLOR_GREEN   "\033[32m"
@@ -16,10 +17,42 @@
 #define PASS_TAG COLOR_GREEN "[PASS]" COLOR_RESET
 #define FAIL_TAG COLOR_RED "[FAIL]" COLOR_RESET
 
+/* --- Test Instance Helper --- */
+/* Simulates the old global API for tests so we don't have to rewrite them all */
+static mm_allocator_t* _test_allocator = NULL;
+static void* _test_pool = NULL;
+#define TEST_POOL_SIZE (1024 * 1024 * 32) /* 32MB for tests */
+
+static inline void _test_init(void) {
+    if (_test_pool) return;
+    _test_pool = malloc(TEST_POOL_SIZE);
+    _test_allocator = mm_create(_test_pool, TEST_POOL_SIZE);
+}
+
+static inline void _test_destroy(void) {
+    if (_test_pool) { free(_test_pool); _test_pool = NULL; }
+    _test_allocator = NULL;
+}
+
+#define mm_init() _test_init()
+#define mm_destroy() _test_destroy()
+#define mm_malloc(s) mm_malloc_inst(_test_allocator, s)
+#define mm_free(p) mm_free_inst(_test_allocator, p)
+#define mm_calloc(n, s) mm_calloc_inst(_test_allocator, n, s)
+#define mm_realloc(p, s) mm_realloc_inst(_test_allocator, p, s)
+#define mm_get_free_space() mm_get_free_space_inst(_test_allocator)
+#define mm_malloc_usable_size(p) mm_get_usable_size(_test_allocator, p)
+#define mm_get_total_allocated() mm_get_total_allocated_inst(_test_allocator)
+#define mm_validate() mm_validate_inst(_test_allocator)
+#define mm_reset_allocator() do { _test_destroy(); _test_init(); } while(0)
+
+/* Map old global variable names to our test instance */
+#define sys_allocator _test_allocator
+
 /* Test result tracking */
-static int _tests_run = 0;
-static int _tests_passed = 0;
-static int _tests_failed = 0;
+static int _tests_run __attribute__((unused)) = 0;
+static int _tests_passed __attribute__((unused)) = 0;
+static int _tests_failed __attribute__((unused)) = 0;
 
 /* Assertion macros - return 0 on failure */
 #define ASSERT(cond) do { \
