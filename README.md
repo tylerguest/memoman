@@ -9,8 +9,6 @@ Core principles:
 - Operations are **O(1)** (bounded by FL/SL bitmap sizes, not heap size).
 - Block layout matches TLSF 3.1: user payload starts immediately after the size word; free-list pointers live in the payload when free.
 
-Roadmap and parity goals live in `GOALS.md`.
-
 ## Features
 
 - TLSF-style two-level bitmaps and segregated free lists (O(1) search/insert/remove).
