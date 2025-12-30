@@ -34,12 +34,17 @@ static int test_free_heap_end(void) {
 }
 
 static int test_misaligned_free(void) {
+#if defined(MM_DEBUG) && defined(MM_DEBUG_ABORT_ON_INVALID_POINTER) && MM_DEBUG_ABORT_ON_INVALID_POINTER
+  /* In strict debug pointer-safety mode, invalid frees abort by design. */
+  return 1;
+#else
   void* valid = mm_malloc(128);
   ASSERT_NOT_NULL(valid);
   void* misaligned = (char*)valid + 3;
   mm_free(misaligned); /* Should ignore */
   mm_free(valid);
   return 1;
+#endif
 }
 
 static int test_large_block_invalid_free(void) {

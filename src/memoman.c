@@ -1,14 +1,28 @@
 #define _GNU_SOURCE
 
-#include "memoman.h"
-#include <string.h>
 #include <assert.h>
-#include <stdint.h>
 #include <limits.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
 
-/* =====================================================================================
- * Internal TLSF definitions
- * ===================================================================================== */
+#include "memoman.h"
+
+/*
+** memoman
+**
+** A pool-based TLSF allocator targeting TLSF 3.1 semantics:
+** - O(1) hot-path operations (bounded by FL/SL bitmaps).
+** - No OS allocation APIs in core (caller provides memory pools).
+** - Free-list pointers live in the user payload when a block is free.
+*/
+
+/*
+** Architecture-specific bit manipulation routines.
+**
+** TLSF achieves O(1) cost for malloc and free operations by limiting the search for a free block to a bounded set
+** of lists and using bitmaps for O(1) lookup of the next non-empty list.
+*/
 
 /* C99-compatible compile-time assertions. */
 #define MM_STATIC_ASSERT(cond, name) typedef char mm_static_assert_##name[(cond) ? 1 : -1]
@@ -33,6 +47,12 @@ typedef struct tlsf_block_t {
   struct tlsf_block_t* prev_free;
 } tlsf_block_t;
 
+/*
+** Pool tracking.
+**
+** For TLSF-style tooling (`mm_walk_pool`, `mm_validate_pool`, `mm_remove_pool`) we must be able to operate on a
+** specific pool without ever walking across pools.
+*/
 /* Pool tracking (bounded, O(1) scans). */
 #define MM_MAX_POOLS 32
 
@@ -97,7 +117,7 @@ struct mm_allocator_t {
   mm_pool_desc_t pools[MM_MAX_POOLS];
 };
 
-/* === Compile-time invariants (Conte-style) === */
+/* Compile-time invariants. */
 MM_STATIC_ASSERT((ALIGNMENT & (ALIGNMENT - 1)) == 0, alignment_power_of_two);
 MM_STATIC_ASSERT(ALIGNMENT >= sizeof(void*), alignment_ge_pointer);
 MM_STATIC_ASSERT(MM_ALIGN_SHIFT >= 0, alignment_shift_supported);
@@ -112,9 +132,14 @@ MM_STATIC_ASSERT(SL_INDEX_COUNT <= (sizeof(unsigned int) * 8), sl_bitmap_fits_ui
 MM_STATIC_ASSERT(FL_INDEX_COUNT <= (sizeof(unsigned int) * 8), fl_bitmap_fits_uint);
 
 static inline size_t align_size(size_t size) {
-    return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+  return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
 }
 
+/*
+** Bit operations (ffs/fls).
+**
+** Note: our bitmaps are `unsigned int`, mirroring TLSF 3.1.
+*/
 static inline int fls_u32(unsigned int word) {
   if (!word) return -1;
   return 31 - __builtin_clz(word);
@@ -150,6 +175,12 @@ static inline void block_set_prev(tlsf_block_t* block, tlsf_block_t* prev) {
   *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*))) = prev;
 }
 
+/*
+** Mapping functions (size -> (fl, sl)).
+**
+** `mapping_insert` maps a block size to its exact bucket.
+** `mapping_search` rounds up to the next size class then maps.
+*/
 static inline void mapping_insert(size_t size, int* fli, int* sli) {
   int fl, sl;
   if (size < SMALL_BLOCK_SIZE) {
@@ -193,6 +224,9 @@ static inline tlsf_block_t* search_suitable_block(mm_allocator_t* ctrl, size_t s
   return ctrl->blocks[fl][sl];
 }
 
+/*
+** Free list operations.
+*/
 static void remove_free_block_direct(mm_allocator_t* ctrl, tlsf_block_t* block, int fl, int sl) {
   tlsf_block_t* prev = block->prev_free;
   tlsf_block_t* next = block->next_free;
@@ -207,7 +241,7 @@ static void remove_free_block_direct(mm_allocator_t* ctrl, tlsf_block_t* block, 
     next->prev_free = prev;
   }
 
-  // If the list is now empty, update the bitmaps
+  /* If the list is now empty, update the bitmaps. */
   if (!ctrl->blocks[fl][sl]) {
     ctrl->sl_bitmap[fl] &= ~(1U << sl);
     if (ctrl->sl_bitmap[fl] == 0) {
@@ -235,7 +269,7 @@ static void insert_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
     
   ctrl->blocks[fl][sl] = block;
 
-  // Update bitmaps
+  /* Update bitmaps. */
   ctrl->sl_bitmap[fl] |= (1U << sl);
   ctrl->fl_bitmap |= (1U << fl);
   ctrl->current_free_size += block_size(block);
@@ -244,6 +278,9 @@ static void insert_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
 static inline void* block_to_user(tlsf_block_t* block) { return (void*)((char*)block + BLOCK_START_OFFSET); }
 static inline tlsf_block_t* user_to_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_START_OFFSET); }
 
+/*
+** Pool handle helpers.
+*/
 static mm_pool_desc_t* pool_desc_from_handle(mm_allocator_t* ctrl, mm_pool_t pool) {
   if (!ctrl || !pool) return NULL;
   uintptr_t base = (uintptr_t)&ctrl->pools[0];
@@ -284,6 +321,11 @@ static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* 
   return next;
 }
 
+/*
+** Pointer safety helpers (debug mode).
+**
+** In MM_DEBUG builds we can afford to confirm pointer correctness by walking only within its pool.
+*/
 static inline int mm_block_ptr_in_pool(const mm_pool_desc_t* desc, const tlsf_block_t* block) {
   if (!desc || !block) return 0;
   uintptr_t addr = (uintptr_t)block;
@@ -302,6 +344,14 @@ static inline int mm_block_header_sane(const mm_pool_desc_t* desc, const tlsf_bl
 }
 
 #ifdef MM_DEBUG
+#if !defined(MM_DEBUG_ABORT_ON_INVALID_POINTER)
+#define MM_DEBUG_ABORT_ON_INVALID_POINTER 1
+#endif
+
+#if !defined(MM_DEBUG_ABORT_ON_DOUBLE_FREE)
+#define MM_DEBUG_ABORT_ON_DOUBLE_FREE 0
+#endif
+
 static tlsf_block_t* mm_debug_find_block_for_ptr(mm_allocator_t* ctrl, mm_pool_desc_t* desc, const void* ptr) {
   (void)ctrl;
   if (!desc || !ptr) return NULL;
@@ -354,14 +404,46 @@ static tlsf_block_t* mm_debug_find_containing_block(mm_allocator_t* ctrl, mm_poo
 }
 #endif
 
-static inline int mm_ptr_is_from_allocator(mm_allocator_t* ctrl, const void* ptr, mm_pool_desc_t** out_pool) {
-  if (out_pool) *out_pool = NULL;
-  if (!ctrl || !ptr) return 0;
+typedef enum {
+  MM_PTR_OK = 0,
+  MM_PTR_INVALID = 1,
+  MM_PTR_STALE_DOUBLE_FREE = 2,
+} mm_ptr_check_t;
+
+static inline mm_ptr_check_t mm_ptr_to_block_checked(
+  mm_allocator_t* ctrl,
+  void* ptr,
+  mm_pool_desc_t** out_pool_desc,
+  tlsf_block_t** out_block
+) {
+  if (out_pool_desc) *out_pool_desc = NULL;
+  if (out_block) *out_block = NULL;
+  if (!ctrl || !ptr) return MM_PTR_INVALID;
+
+  if (((uintptr_t)ptr % ALIGNMENT) != 0) return MM_PTR_INVALID;
 
   mm_pool_t pool = mm_get_pool_for_ptr(ctrl, ptr);
-  if (!pool) return 0;
-  if (out_pool) *out_pool = (mm_pool_desc_t*)pool;
-  return 1;
+  if (!pool) return MM_PTR_INVALID;
+
+  mm_pool_desc_t* pool_desc = (mm_pool_desc_t*)pool;
+  if (out_pool_desc) *out_pool_desc = pool_desc;
+
+#ifdef MM_DEBUG
+  tlsf_block_t* exact = mm_debug_find_block_for_ptr(ctrl, pool_desc, ptr);
+  if (exact) {
+    if (out_block) *out_block = exact;
+    return MM_PTR_OK;
+  }
+
+  tlsf_block_t* containing = mm_debug_find_containing_block(ctrl, pool_desc, ptr);
+  if (containing && block_is_free(containing)) return MM_PTR_STALE_DOUBLE_FREE;
+  return MM_PTR_INVALID;
+#else
+  tlsf_block_t* block = user_to_block(ptr);
+  if (!mm_block_header_sane(pool_desc, block)) return MM_PTR_INVALID;
+  if (out_block) *out_block = block;
+  return MM_PTR_OK;
+#endif
 }
 
 static inline void block_mark_as_free(mm_allocator_t* ctrl, tlsf_block_t* block) {
@@ -391,11 +473,11 @@ static inline tlsf_block_t* split_block(mm_allocator_t* ctrl, tlsf_block_t* bloc
   tlsf_block_t* remainder = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + size);
   block_set_size(remainder, remainder_size);
   block_set_free(remainder);
-  block_set_prev_used(remainder); // The block before remainder is now used
+  block_set_prev_used(remainder); /* The block before remainder is now used. */
 
   tlsf_block_t* next = block_next_safe(ctrl, remainder);
   if (next) {
-    block_set_prev_free(next); // The block before next is now free (remainder)
+    block_set_prev_free(next); /* The block before next is now free (remainder). */
     block_set_prev(next, remainder);
   }
   return remainder;
@@ -434,6 +516,11 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
   return block;
 }
 
+/*
+** Validation.
+**
+** Validation is allowed to be O(n) in block count; it is not used on the hot path in release builds.
+*/
 
 int mm_validate(mm_allocator_t* ctrl) {
   if (!ctrl) return 0;
@@ -664,6 +751,9 @@ static void mm_check_integrity(mm_allocator_t* ctrl) {
 #define mm_check_integrity(ctrl) ((void)0)
 #endif
 
+/*
+** Public API.
+*/
 mm_allocator_t* mm_create(void* mem, size_t bytes) {
   /* Overhead: Allocator + Alignment Padding + Min Block + Epilogue */
   size_t overhead = sizeof(mm_allocator_t) + ALIGNMENT + BLOCK_HEADER_OVERHEAD + BLOCK_HEADER_OVERHEAD;
@@ -697,6 +787,9 @@ void mm_destroy(mm_allocator_t* alloc) {
   (void)alloc;
 }
 
+/*
+** Extensions.
+*/
 int mm_reset(mm_allocator_t* allocator) {
   if (!allocator) return 0;
 
@@ -909,62 +1002,24 @@ void mm_free(mm_allocator_t* ctrl, void* ptr) {
   if (!ptr || !ctrl) return;
   mm_check_integrity(ctrl);
 
-  if ((uintptr_t)ptr % ALIGNMENT != 0) {
-    return;
-  }
-
   mm_pool_desc_t* pool_desc = NULL;
-  if (!mm_ptr_is_from_allocator(ctrl, ptr, &pool_desc)) {
+  tlsf_block_t* block = NULL;
+  mm_ptr_check_t ptr_status = mm_ptr_to_block_checked(ctrl, ptr, &pool_desc, &block);
+  if (ptr_status != MM_PTR_OK) {
 #ifdef MM_DEBUG
-#if !defined(MM_DEBUG_ABORT_ON_INVALID_POINTER)
-#define MM_DEBUG_ABORT_ON_INVALID_POINTER 1
-#endif
-    if (MM_DEBUG_ABORT_ON_INVALID_POINTER) {
-      assert(!"mm_free: pointer not owned by allocator");
-    }
-#endif
-    return;
-  }
-
-#ifdef MM_DEBUG
-  tlsf_block_t* exact = mm_debug_find_block_for_ptr(ctrl, pool_desc, ptr);
-  if (!exact) {
-    tlsf_block_t* containing = mm_debug_find_containing_block(ctrl, pool_desc, ptr);
-    if (containing && block_is_free(containing)) {
-      /* Stale pointer into a free region: treat as double free. */
-#if !defined(MM_DEBUG_ABORT_ON_DOUBLE_FREE)
-#define MM_DEBUG_ABORT_ON_DOUBLE_FREE 0
-#endif
-      if (MM_DEBUG_ABORT_ON_DOUBLE_FREE) {
-        assert(!"mm_free: double free");
-      }
+    if (ptr_status == MM_PTR_STALE_DOUBLE_FREE) {
+      if (MM_DEBUG_ABORT_ON_DOUBLE_FREE) assert(!"mm_free: double free");
       return;
     }
-
-#if !defined(MM_DEBUG_ABORT_ON_INVALID_POINTER)
-#define MM_DEBUG_ABORT_ON_INVALID_POINTER 1
+    if (MM_DEBUG_ABORT_ON_INVALID_POINTER) assert(!"mm_free: invalid pointer");
 #endif
-    if (MM_DEBUG_ABORT_ON_INVALID_POINTER) {
-      assert(!"mm_free: invalid pointer");
-    }
     return;
   }
-
-  tlsf_block_t* block = exact;
-#else
-  tlsf_block_t* block = user_to_block(ptr);
-  if (!mm_block_header_sane(pool_desc, block)) {
-    return;
-  }
-#endif
 
   if (block_is_free(block)) {
     /* Double free detected: do nothing, but optionally log for debug */
-    // fprintf(stderr, "[Memoman] Warning: Double free detected for %p\n", ptr);
+    /* fprintf(stderr, "[Memoman] Warning: Double free detected for %p\n", ptr); */
 #ifdef MM_DEBUG
-#if !defined(MM_DEBUG_ABORT_ON_DOUBLE_FREE)
-#define MM_DEBUG_ABORT_ON_DOUBLE_FREE 0
-#endif
     if (MM_DEBUG_ABORT_ON_DOUBLE_FREE) {
       assert(!"mm_free: double free");
     }
@@ -1049,35 +1104,14 @@ void* mm_realloc(mm_allocator_t* ctrl, void* ptr, size_t size) {
 #endif
 
   mm_pool_desc_t* pool_desc = NULL;
-  if (!mm_ptr_is_from_allocator(ctrl, ptr, &pool_desc)) {
+  tlsf_block_t* block = NULL;
+  mm_ptr_check_t ptr_status = mm_ptr_to_block_checked(ctrl, ptr, &pool_desc, &block);
+  if (ptr_status != MM_PTR_OK) {
 #ifdef MM_DEBUG
-#if !defined(MM_DEBUG_ABORT_ON_INVALID_POINTER)
-#define MM_DEBUG_ABORT_ON_INVALID_POINTER 1
-#endif
-    if (MM_DEBUG_ABORT_ON_INVALID_POINTER) {
-      assert(!"mm_realloc: pointer not owned by allocator");
-    }
+    if (MM_DEBUG_ABORT_ON_INVALID_POINTER) assert(!"mm_realloc: invalid pointer");
 #endif
     return NULL;
   }
-
-#ifdef MM_DEBUG
-  tlsf_block_t* block = mm_debug_find_block_for_ptr(ctrl, pool_desc, ptr);
-  if (!block) {
-#if !defined(MM_DEBUG_ABORT_ON_INVALID_POINTER)
-#define MM_DEBUG_ABORT_ON_INVALID_POINTER 1
-#endif
-    if (MM_DEBUG_ABORT_ON_INVALID_POINTER) {
-      assert(!"mm_realloc: invalid pointer");
-    }
-    return NULL;
-  }
-#else
-  tlsf_block_t* block = user_to_block(ptr);
-  if (!mm_block_header_sane(pool_desc, block)) {
-    return NULL;
-  }
-#endif
 
   if (block_is_free(block)) {
 #ifdef MM_DEBUG

@@ -1,4 +1,4 @@
-#include "memoman.h"
+#include "./src/memoman.h"
 
 #include <stdint.h>
 #include <stdio.h>
