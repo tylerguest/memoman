@@ -144,7 +144,7 @@ This is what makes TLSF implementations usable by other people.
     - Verify per-pool prologue/epilogue invariants (no cross-pool walks)
   - **Deliverable**: `MM_DEBUG` build flag that turns validation on aggressively.
 
-- [ ] **Pointer safety policy (debug mode)**
+- [x] **Pointer safety policy (debug mode)**
   - **Goal**: Make it obvious when the user passes garbage pointers.
   - **Options**:
     - cookies/magic checks

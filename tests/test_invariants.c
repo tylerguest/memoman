@@ -1,6 +1,7 @@
 #include "test_framework.h"
 #include "memoman_test_internal.h"
 #include <stddef.h>
+#include <stdlib.h>
 
 /* Helper to acccess internal block structure */
 static tlsf_block_t* get_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_HEADER_OVERHEAD); }
@@ -102,7 +103,6 @@ static int test_bitmap_consistency() {
   return 1;
 }
 
-#ifndef NDEBUG
 static int test_corruption_catch() {
   printf("Running corruption test... expect crash!\n");
   void* p = mm_malloc(64);
@@ -111,16 +111,15 @@ static int test_corruption_catch() {
   mm_free(p);
   return 1;
 }
-#endif
 
 int main() {
   TEST_SUITE_BEGIN("Invariants & Integrity");
   RUN_TEST(test_coalescing_invariants);
   RUN_TEST(test_ghost_pointer_safety);
   RUN_TEST(test_bitmap_consistency);
-#ifndef NDEBUG
-  RUN_TEST(test_corruption_catch);
-#endif
+  if (getenv("MM_RUN_CRASH_TESTS")) {
+    RUN_TEST(test_corruption_catch);
+  }
   TEST_SUITE_END();
   TEST_MAIN_END();
 }

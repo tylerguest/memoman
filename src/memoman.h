@@ -63,6 +63,18 @@ int mm_validate_pool(mm_allocator_t* alloc, mm_pool_t pool);
 mm_pool_t mm_get_pool_for_ptr(mm_allocator_t* alloc, const void* ptr);
 int mm_reset(mm_allocator_t* alloc);
 
+/*
+** Pointer safety policy (debug mode):
+** - In normal builds, `mm_free`/`mm_realloc` perform best-effort checks and ignore/reject pointers that are
+**   clearly invalid (not within any pool, misaligned, or not a plausible block header).
+** - In `MM_DEBUG` builds, invalid pointers may trigger an assertion depending on:
+**   - `MM_DEBUG_ABORT_ON_INVALID_POINTER` (default 1)
+**   - `MM_DEBUG_ABORT_ON_DOUBLE_FREE` (default 0)
+**
+** Passing invalid pointers remains undefined behavior in C; this policy exists to prevent silent corruption and
+** to fail fast in debug builds.
+*/
+
 #if defined(__cplusplus)
 }
 #endif

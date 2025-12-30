@@ -284,6 +284,86 @@ static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* 
   return next;
 }
 
+static inline int mm_block_ptr_in_pool(const mm_pool_desc_t* desc, const tlsf_block_t* block) {
+  if (!desc || !block) return 0;
+  uintptr_t addr = (uintptr_t)block;
+  return addr >= (uintptr_t)desc->start && addr < (uintptr_t)desc->end;
+}
+
+static inline int mm_block_header_sane(const mm_pool_desc_t* desc, const tlsf_block_t* block) {
+  if (!mm_block_ptr_in_pool(desc, block)) return 0;
+  size_t sz = block_size((tlsf_block_t*)block);
+  if (sz < TLSF_MIN_BLOCK_SIZE) return 0;
+  if ((sz % ALIGNMENT) != 0) return 0;
+  tlsf_block_t* epilogue = (tlsf_block_t*)((char*)desc->end - BLOCK_HEADER_OVERHEAD);
+  uintptr_t end = (uintptr_t)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
+  if (end > (uintptr_t)epilogue) return 0;
+  return 1;
+}
+
+#ifdef MM_DEBUG
+static tlsf_block_t* mm_debug_find_block_for_ptr(mm_allocator_t* ctrl, mm_pool_desc_t* desc, const void* ptr) {
+  (void)ctrl;
+  if (!desc || !ptr) return NULL;
+
+  if (((uintptr_t)ptr % ALIGNMENT) != 0) return NULL;
+  tlsf_block_t* epilogue = (tlsf_block_t*)((char*)desc->end - BLOCK_HEADER_OVERHEAD);
+  tlsf_block_t* block = (tlsf_block_t*)desc->start;
+
+  size_t max_steps = (desc->bytes / ALIGNMENT) + 2;
+  for (size_t step = 0; step < max_steps; step++) {
+    size_t sz = block_size(block);
+    if (sz == 0) break;
+
+    if (!mm_block_header_sane(desc, block)) return NULL;
+    if (block_to_user(block) == ptr) return block;
+
+    tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
+    if ((uintptr_t)next > (uintptr_t)epilogue) return NULL;
+    block = next;
+  }
+
+  return NULL;
+}
+
+static tlsf_block_t* mm_debug_find_containing_block(mm_allocator_t* ctrl, mm_pool_desc_t* desc, const void* ptr) {
+  (void)ctrl;
+  if (!desc || !ptr) return NULL;
+  if (((uintptr_t)ptr % ALIGNMENT) != 0) return NULL;
+
+  tlsf_block_t* epilogue = (tlsf_block_t*)((char*)desc->end - BLOCK_HEADER_OVERHEAD);
+  tlsf_block_t* block = (tlsf_block_t*)desc->start;
+
+  size_t max_steps = (desc->bytes / ALIGNMENT) + 2;
+  for (size_t step = 0; step < max_steps; step++) {
+    size_t sz = block_size(block);
+    if (sz == 0) break;
+
+    if (!mm_block_header_sane(desc, block)) return NULL;
+
+    char* user = (char*)block_to_user(block);
+    char* end = user + sz;
+    if ((const char*)ptr >= user && (const char*)ptr < end) return block;
+
+    tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
+    if ((uintptr_t)next > (uintptr_t)epilogue) return NULL;
+    block = next;
+  }
+
+  return NULL;
+}
+#endif
+
+static inline int mm_ptr_is_from_allocator(mm_allocator_t* ctrl, const void* ptr, mm_pool_desc_t** out_pool) {
+  if (out_pool) *out_pool = NULL;
+  if (!ctrl || !ptr) return 0;
+
+  mm_pool_t pool = mm_get_pool_for_ptr(ctrl, ptr);
+  if (!pool) return 0;
+  if (out_pool) *out_pool = (mm_pool_desc_t*)pool;
+  return 1;
+}
+
 static inline void block_mark_as_free(mm_allocator_t* ctrl, tlsf_block_t* block) {
 #ifdef MM_DEBUG
   size_t sz = block_size(block);
@@ -833,15 +913,65 @@ void mm_free(mm_allocator_t* ctrl, void* ptr) {
     return;
   }
 
+  mm_pool_desc_t* pool_desc = NULL;
+  if (!mm_ptr_is_from_allocator(ctrl, ptr, &pool_desc)) {
+#ifdef MM_DEBUG
+#if !defined(MM_DEBUG_ABORT_ON_INVALID_POINTER)
+#define MM_DEBUG_ABORT_ON_INVALID_POINTER 1
+#endif
+    if (MM_DEBUG_ABORT_ON_INVALID_POINTER) {
+      assert(!"mm_free: pointer not owned by allocator");
+    }
+#endif
+    return;
+  }
+
+#ifdef MM_DEBUG
+  tlsf_block_t* exact = mm_debug_find_block_for_ptr(ctrl, pool_desc, ptr);
+  if (!exact) {
+    tlsf_block_t* containing = mm_debug_find_containing_block(ctrl, pool_desc, ptr);
+    if (containing && block_is_free(containing)) {
+      /* Stale pointer into a free region: treat as double free. */
+#if !defined(MM_DEBUG_ABORT_ON_DOUBLE_FREE)
+#define MM_DEBUG_ABORT_ON_DOUBLE_FREE 0
+#endif
+      if (MM_DEBUG_ABORT_ON_DOUBLE_FREE) {
+        assert(!"mm_free: double free");
+      }
+      return;
+    }
+
+#if !defined(MM_DEBUG_ABORT_ON_INVALID_POINTER)
+#define MM_DEBUG_ABORT_ON_INVALID_POINTER 1
+#endif
+    if (MM_DEBUG_ABORT_ON_INVALID_POINTER) {
+      assert(!"mm_free: invalid pointer");
+    }
+    return;
+  }
+
+  tlsf_block_t* block = exact;
+#else
   tlsf_block_t* block = user_to_block(ptr);
+  if (!mm_block_header_sane(pool_desc, block)) {
+    return;
+  }
+#endif
 
   if (block_is_free(block)) {
     /* Double free detected: do nothing, but optionally log for debug */
     // fprintf(stderr, "[Memoman] Warning: Double free detected for %p\n", ptr);
+#ifdef MM_DEBUG
+#if !defined(MM_DEBUG_ABORT_ON_DOUBLE_FREE)
+#define MM_DEBUG_ABORT_ON_DOUBLE_FREE 0
+#endif
+    if (MM_DEBUG_ABORT_ON_DOUBLE_FREE) {
+      assert(!"mm_free: double free");
+    }
+#endif
     return;
   }
 
-  mm_pool_desc_t* pool_desc = pool_desc_for_block(ctrl, block);
 #ifdef MM_DEBUG
   assert(pool_desc && pool_desc->live_allocations > 0);
 #endif
@@ -914,6 +1044,48 @@ void* mm_realloc(mm_allocator_t* ctrl, void* ptr, size_t size) {
   if (!ptr) return mm_malloc(ctrl, size);
   if (size == 0) { mm_free(ctrl, ptr); return NULL; }
 
+#ifdef MM_DEBUG
+  if (!ctrl) return NULL;
+#endif
+
+  mm_pool_desc_t* pool_desc = NULL;
+  if (!mm_ptr_is_from_allocator(ctrl, ptr, &pool_desc)) {
+#ifdef MM_DEBUG
+#if !defined(MM_DEBUG_ABORT_ON_INVALID_POINTER)
+#define MM_DEBUG_ABORT_ON_INVALID_POINTER 1
+#endif
+    if (MM_DEBUG_ABORT_ON_INVALID_POINTER) {
+      assert(!"mm_realloc: pointer not owned by allocator");
+    }
+#endif
+    return NULL;
+  }
+
+#ifdef MM_DEBUG
+  tlsf_block_t* block = mm_debug_find_block_for_ptr(ctrl, pool_desc, ptr);
+  if (!block) {
+#if !defined(MM_DEBUG_ABORT_ON_INVALID_POINTER)
+#define MM_DEBUG_ABORT_ON_INVALID_POINTER 1
+#endif
+    if (MM_DEBUG_ABORT_ON_INVALID_POINTER) {
+      assert(!"mm_realloc: invalid pointer");
+    }
+    return NULL;
+  }
+#else
+  tlsf_block_t* block = user_to_block(ptr);
+  if (!mm_block_header_sane(pool_desc, block)) {
+    return NULL;
+  }
+#endif
+
+  if (block_is_free(block)) {
+#ifdef MM_DEBUG
+    assert(!"mm_realloc: pointer refers to a free block");
+#endif
+    return NULL;
+  }
+
   int status = try_realloc_inplace(ctrl, ptr, size);
   
   if (status == 0) return ptr; /* In-place success */
@@ -924,7 +1096,7 @@ void* mm_realloc(mm_allocator_t* ctrl, void* ptr, size_t size) {
   /* Status 1: Needs move */
   void* new_ptr = mm_malloc(ctrl, size);
   if (new_ptr) {
-    size_t old_usable = block_size(user_to_block(ptr));
+    size_t old_usable = block_size(block);
     memcpy(new_ptr, ptr, (old_usable < size) ? old_usable : size);
     mm_free(ctrl, ptr);
   }
