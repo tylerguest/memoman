@@ -23,15 +23,6 @@ Core principles:
 make run          # build + run all tests
 make benchmark    # optimized build (for benchmark suite)
 ./tests/bin/benchmark_suite
-```
-
-## Using It
-
-`memoman` is a small single-translation-unit library: add `src/memoman.c` to your build and include `src/memoman.h`.
-
-### Compile
-
-```bash
 make demo
 ./demo
 ```
