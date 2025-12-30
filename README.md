@@ -15,7 +15,7 @@ Core principles:
 - Discontiguous pools (`mm_add_pool`) in a single allocator instance.
 - Immediate coalescing and correct prev-physical linkage (TLSF 3.1 semantics).
 - `mm_memalign` with Conte-style gap handling.
-- Internal validation (`mm_validate`) and a differential parity test against Conte TLSF (`tests/test_parity_conte.c`).
+- Internal validation (`mm_validate`).
 
 ## Quick Build & Test
 
@@ -106,7 +106,7 @@ int mm_validate(mm_allocator_t* alloc);
 │   ├── memoman.c
 │   └── memoman.h
 └── tests/
-    ├── test_*.c              # unit tests + parity harness
+    ├── test_*.c              # unit tests
     ├── memoman_test_internal.h
     └── bin/                  # compiled test binaries
 ```

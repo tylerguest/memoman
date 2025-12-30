@@ -43,16 +43,13 @@ Before adding features, make sure your layout + invariants match the reference m
   - **Requirement**: Bit-scan wrappers must be safe for 32-bit/64-bit and for edge cases.
   - **Deliverable**: A deterministic test that compares your (fl,sl) results to Conte’s for a sweep of sizes (differential test).
 
-- [x] **Differential parity harness (Conte vs memoman)**
+- [ ] **Differential parity harness (Conte vs memoman)**
   - **Goal**: Make regressions obvious by running the same operation stream against both allocators.
   - **Requirement**: Fixed seed, deterministic operation generator, and “shrinkable” failures (log the minimal reproducer).
-  - **Deliverables**:
-    - a parity test that links Conte TLSF side-by-side (in `tests/`)
-    - a golden log format for failing sequences (easy to replay)
-  - **Note**: Strict behavior parity can be enabled with `MM_PARITY_STRICT=1` (fails the test on the first mismatch).
+  - **Note**: Do not vendor Conte TLSF sources in this repo; keep parity harness as a local/dev-only tool that builds only if external TLSF sources are present.
 
-- [x] **Strict parity mode passes**
-  - **Goal**: Make `MM_PARITY_STRICT=1` pass for representative workloads (then flip it on by default).
+- [ ] **Strict parity mode passes**
+  - **Goal**: Make strict behavior parity mode pass for representative workloads (then flip it on by default).
 
 ## Phase 1: API Parity (The “Conte Standard” Surface)
 
