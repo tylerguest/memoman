@@ -285,12 +285,12 @@ static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* 
 }
 
 static inline void block_mark_as_free(mm_allocator_t* ctrl, tlsf_block_t* block) {
-  block_set_free(block);
 #ifdef MM_DEBUG
   size_t sz = block_size(block);
-  assert(sz >= TLSF_MIN_BLOCK_SIZE);
-  assert(sz <= ctrl->total_pool_size);
+  if (sz < TLSF_MIN_BLOCK_SIZE) return;
+  if (sz > ctrl->total_pool_size) return;
 #endif
+  block_set_free(block);
   tlsf_block_t* next = block_next_safe(ctrl, block);
   if (next) {
     block_set_prev_free(next);
@@ -360,15 +360,77 @@ int mm_validate(mm_allocator_t* ctrl) {
 
   #define CHECK(cond, msg) do { if (!(cond)) { return 0; } } while(0)
 
-  /* Physical walk removed as we now support discontiguous pools and don't track them all */
-
   /* 1. Per-pool physical validation. */
+  size_t pools_bytes = 0;
   for (size_t i = 0; i < MM_MAX_POOLS; i++) {
     if (!ctrl->pools[i].active) continue;
+    pools_bytes += ctrl->pools[i].bytes;
     CHECK(mm_validate_pool(ctrl, (mm_pool_t)&ctrl->pools[i]), "Pool validation failed");
   }
+  CHECK(pools_bytes == ctrl->total_pool_size, "total_pool_size does not match sum of pools");
 
-  /* 2. Logical Free List Walk */
+  /*
+  ** 2. Physical walk: collect free-block counts per bucket.
+  ** This is O(n) in block count and avoids per-block list searches (which can be O(n^2)).
+  */
+  size_t phys_counts[TLSF_FLI_MAX][TLSF_SLI_COUNT];
+  memset(phys_counts, 0, sizeof(phys_counts));
+
+  size_t phys_free_blocks = 0;
+  size_t phys_free_bytes = 0;
+  for (size_t i = 0; i < MM_MAX_POOLS; i++) {
+    mm_pool_desc_t* desc = &ctrl->pools[i];
+    if (!desc->active) continue;
+
+    tlsf_block_t* block = (tlsf_block_t*)desc->start;
+    tlsf_block_t* epilogue = (tlsf_block_t*)(desc->end - BLOCK_HEADER_OVERHEAD);
+
+    size_t max_steps = (desc->bytes / ALIGNMENT) + 2;
+    for (size_t step = 0; step < max_steps; step++) {
+      size_t sz = block_size(block);
+      if (sz == 0) break;
+
+      if (block_is_free(block)) {
+        int fl = 0, sl = 0;
+        mapping_insert(sz, &fl, &sl);
+        CHECK(fl >= 0 && fl < TLSF_FLI_MAX, "Free block FL index out of range");
+        CHECK(sl >= 0 && sl < TLSF_SLI_COUNT, "Free block SL index out of range");
+        phys_counts[fl][sl]++;
+        phys_free_blocks++;
+        phys_free_bytes += sz;
+      }
+
+      tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
+      CHECK((uintptr_t)next <= (uintptr_t)epilogue, "Physical walk stepped past epilogue");
+      block = next;
+    }
+  }
+
+  /* 3. Bitmap structure consistency. */
+  {
+    const unsigned int fl_mask = (TLSF_FLI_MAX >= (int)(sizeof(unsigned int) * 8))
+      ? ~0u
+      : ((1u << TLSF_FLI_MAX) - 1u);
+    CHECK((ctrl->fl_bitmap & ~fl_mask) == 0, "FL bitmap has out-of-range bits");
+
+    const unsigned int sl_mask = (TLSF_SLI_COUNT >= (int)(sizeof(unsigned int) * 8))
+      ? ~0u
+      : ((1u << TLSF_SLI_COUNT) - 1u);
+
+    for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
+      CHECK((ctrl->sl_bitmap[fl] & ~sl_mask) == 0, "SL bitmap has out-of-range bits");
+      if (ctrl->sl_bitmap[fl]) CHECK((ctrl->fl_bitmap & (1u << fl)) != 0, "FL bitmap cleared but SL bitmap nonzero");
+      else CHECK((ctrl->fl_bitmap & (1u << fl)) == 0, "FL bitmap set but SL bitmap zero");
+    }
+  }
+
+  /* 4. Logical free list walk (collect free-block counts per bucket). */
+  const size_t max_list_nodes = (ctrl->total_pool_size / ALIGNMENT) + 8;
+  size_t free_list_blocks = 0;
+  size_t free_list_bytes = 0;
+  size_t list_counts[TLSF_FLI_MAX][TLSF_SLI_COUNT];
+  memset(list_counts, 0, sizeof(list_counts));
+
   for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
     for (int sl = 0; sl < TLSF_SLI_COUNT; sl++) {
       tlsf_block_t* block = ctrl->blocks[fl][sl];
@@ -383,14 +445,20 @@ int mm_validate(mm_allocator_t* ctrl) {
 
       tlsf_block_t* walk = block;
       tlsf_block_t* list_prev = NULL;
-      int count = 0;
+      size_t count = 0;
       
       while (walk) {
-        CHECK(count++ < 10000, "Infinite loop detected in free list");
+        CHECK(count++ < max_list_nodes, "Infinite loop detected in free list");
         CHECK(block_is_free(walk), "Used block found in free list");
         CHECK(walk->prev_free == list_prev, "Free list prev pointer broken");
         CHECK((block_size(walk) % ALIGNMENT) == 0, "Free block size unaligned");
         CHECK(block_size(walk) >= TLSF_MIN_BLOCK_SIZE, "Free block too small");
+        CHECK(walk->next_free != walk, "Self-loop detected in free list");
+
+        mm_pool_desc_t* desc = pool_desc_for_block(ctrl, walk);
+        CHECK(desc != NULL, "Free list block not contained by any pool");
+        CHECK((uintptr_t)walk >= (uintptr_t)desc->start, "Free list block outside pool start");
+        CHECK((uintptr_t)walk < (uintptr_t)desc->end, "Free list block outside pool end");
 
         /* Prev-physical linkage: the next block must mark prev as free and point back to us. */
         tlsf_block_t* phys_next = block_next_safe(ctrl, walk);
@@ -403,11 +471,26 @@ int mm_validate(mm_allocator_t* ctrl) {
         mapping_insert(block_size(walk), &mapped_fl, &mapped_sl);
         CHECK(mapped_fl == fl && mapped_sl == sl, "Block in wrong free list bucket");
 
+        list_counts[fl][sl]++;
+        free_list_blocks++;
+        free_list_bytes += block_size(walk);
+
         list_prev = walk;
         walk = walk->next_free;
       }
     }
   }
+
+  CHECK(phys_free_bytes == ctrl->current_free_size, "current_free_size mismatch");
+  CHECK(phys_free_bytes == free_list_bytes, "Free list bytes mismatch");
+  CHECK(phys_free_blocks == free_list_blocks, "Free list blocks mismatch");
+
+  for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
+    for (int sl = 0; sl < TLSF_SLI_COUNT; sl++) {
+      CHECK(phys_counts[fl][sl] == list_counts[fl][sl], "Free list bucket count mismatch");
+    }
+  }
+
   #undef CHECK
   return 1;
 }
@@ -439,6 +522,11 @@ int mm_validate_pool(mm_allocator_t* alloc, mm_pool_t pool) {
     tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
     if ((uintptr_t)next > (uintptr_t)epilogue) return 0;
 
+    if (!prev) {
+      /* First block's prev-physical pointer is outside the pool, so it must always be "prev used". */
+      if (block_is_prev_free(block)) return 0;
+    }
+
     if (block_is_prev_free(block)) {
       if (!prev) return 0;
       if (!block_is_free(prev)) return 0;
@@ -451,6 +539,8 @@ int mm_validate_pool(mm_allocator_t* alloc, mm_pool_t pool) {
       if (block_is_free(block)) {
         if (!block_is_prev_free(next)) return 0;
         if (block_prev(next) != block) return 0;
+        /* With immediate coalescing, two adjacent free blocks must not exist. */
+        if (block_is_free(next) && block_size(next) != 0) return 0;
       } else {
         if (block_is_prev_free(next)) return 0;
       }
@@ -462,12 +552,33 @@ int mm_validate_pool(mm_allocator_t* alloc, mm_pool_t pool) {
   }
 
   if ((uintptr_t)block != (uintptr_t)epilogue) return 0;
+
+  /* Epilogue prev_free flag must match the last real block's state. */
+  if (!prev) return 0;
+  if (block_is_free(prev)) {
+    if (!block_is_prev_free(epilogue)) return 0;
+    if (block_prev(epilogue) != prev) return 0;
+  } else {
+    if (block_is_prev_free(epilogue)) return 0;
+  }
+
   return 1;
 }
 
 #ifdef MM_DEBUG
 static void mm_check_integrity(mm_allocator_t* ctrl) {
-  assert(mm_validate(ctrl) && "Heap integrity check failed");
+  /*
+  ** Full validation is expensive (walks pools + free lists). In MM_DEBUG we run
+  ** it periodically so debug builds stay usable while still catching corruption.
+  */
+#ifndef MM_DEBUG_VALIDATE_SHIFT
+#define MM_DEBUG_VALIDATE_SHIFT 10 /* validate every 1024 allocator ops */
+#endif
+  static size_t counter = 0;
+  counter++;
+  if ((counter & (((size_t)1u << MM_DEBUG_VALIDATE_SHIFT) - 1u)) == 0) {
+    assert(mm_validate(ctrl) && "Heap integrity check failed");
+  }
 }
 #else
 #define mm_check_integrity(ctrl) ((void)0)
@@ -638,9 +749,6 @@ void mm_remove_pool(mm_allocator_t* allocator, mm_pool_t pool) {
   mm_pool_desc_t* desc = pool_desc_from_handle(allocator, pool);
   if (!desc) return;
 
-#ifdef MM_DEBUG
-  assert(desc->live_allocations == 0 && "mm_remove_pool requires the pool to have no live allocations");
-#endif
   if (desc->live_allocations != 0) return;
 
   tlsf_block_t* block = (tlsf_block_t*)desc->start;

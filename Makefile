@@ -22,7 +22,9 @@ clean:
 	rm -f $(BIN_DIR)/*
 	rmdir $(BIN_DIR) 2>/dev/null || true
 
-debug: all
+debug: CFLAGS = $(BASE_FLAGS) -g -DDEBUG_OUTPUT -DMM_DEBUG=1 -DMM_DEBUG_VALIDATE_SHIFT=10
+debug: clean $(TEST_BINS)
+	@echo "Built with MM_DEBUG enabled"
 
 benchmark: CFLAGS = $(BASE_FLAGS) -O3 -DNDEBUG
 benchmark: clean $(TEST_BINS)

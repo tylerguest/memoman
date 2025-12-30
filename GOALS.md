@@ -134,7 +134,7 @@ Target: memoman exposes a TLSF-like surface (namespaced as `mm_*`). Any non-TLSF
 
 This is what makes TLSF implementations usable by other people.
 
-- [ ] **Full internal validation (real `mm_validate`)**
+- [x] **Full internal validation (real `mm_validate`)**
   - **Goal**: Equivalent of Conte’s internal checks: bitmap consistency, free-list correctness, block boundary invariants.
   - **Requirements**:
     - Verify free list pointers are coherent (next/prev links)
