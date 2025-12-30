@@ -1,4 +1,4 @@
-<img src="memoman.png" alt="Memoman" width=75% />
+<img src="memoman.png" alt="Memoman" width=100% />
 
 # memoman
 
