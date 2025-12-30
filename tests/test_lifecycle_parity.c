@@ -33,6 +33,16 @@ static int test_create_with_pool_smoke(void) {
   return 1;
 }
 
+static int test_init_in_place_alias(void) {
+  uint8_t pool[64 * 1024] __attribute__((aligned(16)));
+  mm_allocator_t* alloc = (mm_init_in_place)(pool, sizeof(pool));
+  ASSERT_NOT_NULL(alloc);
+  ASSERT_EQ((void*)alloc, (void*)pool);
+  ASSERT((mm_validate)(alloc));
+  (mm_destroy)(alloc);
+  return 1;
+}
+
 static int test_create_requires_alignment(void) {
   const size_t bytes = 64 * 1024;
   uint8_t* raw = (uint8_t*)malloc(bytes + 16);
@@ -58,6 +68,7 @@ int main(void) {
   RUN_TEST(test_destroy_null_noop);
   RUN_TEST(test_create_in_place);
   RUN_TEST(test_create_with_pool_smoke);
+  RUN_TEST(test_init_in_place_alias);
   RUN_TEST(test_create_requires_alignment);
   RUN_TEST(test_create_requires_minimum_size);
   TEST_SUITE_END();

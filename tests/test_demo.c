@@ -28,7 +28,7 @@ static int test_demo_flow(void) {
   ASSERT_GE((mm_block_size)(a), 1024u);
   ASSERT((mm_validate)(mm));
 
-  ASSERT_EQ(mm_add_pool(mm, pool2, sizeof(pool2)), 1);
+  ASSERT_NOT_NULL(mm_add_pool(mm, pool2, sizeof(pool2)));
   void* d = (mm_malloc)(mm, 64 * 1024);
   ASSERT_NOT_NULL(d);
   ASSERT_GE((mm_block_size)(d), 64u * 1024u);
@@ -49,4 +49,3 @@ int main(void) {
   TEST_SUITE_END();
   TEST_MAIN_END();
 }
-

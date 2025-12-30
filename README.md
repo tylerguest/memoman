@@ -58,7 +58,7 @@ uint8_t pool1[64 * 1024] __attribute__((aligned(16)));
 uint8_t pool2[64 * 1024] __attribute__((aligned(16)));
 
 mm_allocator_t* mm = mm_create(pool1, sizeof(pool1));
-mm_add_pool(mm, pool2, sizeof(pool2));
+mm_pool_t pool = mm_add_pool(mm, pool2, sizeof(pool2));
 ```
 
 ## API
@@ -71,8 +71,10 @@ mm_allocator_t* mm_create(void* mem, size_t bytes);
 mm_allocator_t* mm_create_with_pool(void* mem, size_t bytes);
 void mm_destroy(mm_allocator_t* alloc);
 
-/* Add pools. */
-int mm_add_pool(mm_allocator_t* alloc, void* mem, size_t bytes);
+/* Pools. */
+mm_pool_t mm_get_pool(mm_allocator_t* alloc);
+mm_pool_t mm_add_pool(mm_allocator_t* alloc, void* mem, size_t bytes);
+void mm_remove_pool(mm_allocator_t* alloc, mm_pool_t pool);
 
 /* malloc/memalign/realloc/free replacements. */
 void* mm_malloc(mm_allocator_t* alloc, size_t size);

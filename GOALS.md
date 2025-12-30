@@ -83,7 +83,7 @@ Target: memoman exposes a TLSF-like surface (namespaced as `mm_*`). Any non-TLSF
     - document ownership + alignment rules exactly like TLSF
     - optional symmetry API: `mm_create_with_pool(...)`
 
-- [ ] **Pool handle parity (`pool_t`, `tlsf_get_pool`, `tlsf_add/remove_pool`)**
+- [x] **Pool handle parity (`pool_t`, `tlsf_get_pool`, `tlsf_add/remove_pool`)**
   - **Goal**: Support TLSF-style pool handles so tooling can walk/check/remove specific pools.
   - **Deliverables**:
     - `typedef void* mm_pool_t;` (or an opaque handle)
@@ -91,11 +91,11 @@ Target: memoman exposes a TLSF-like surface (namespaced as `mm_*`). Any non-TLSF
     - `mm_add_pool(mm_allocator_t*, void*, size_t) -> mm_pool_t` (optional boolean wrapper for convenience)
     - `mm_remove_pool(mm_allocator_t*, mm_pool_t)` with Conte-like safety rules (no live allocations in that pool)
 
-- [ ] **Overheads/limits parity (`tlsf_size`, `tlsf_*_overhead`, `tlsf_block_size_min/max`)**
+- [x] **Overheads/limits parity (`tlsf_size`, `tlsf_*_overhead`, `tlsf_block_size_min/max`)**
   - **Goal**: Let integrators size buffers without reading the source.
   - **Deliverables**: `mm_size`, `mm_align_size`, `mm_pool_overhead`, `mm_alloc_overhead`, `mm_block_size_min`, `mm_block_size_max`
 
-- [ ] **Debug tooling parity (`tlsf_walk_pool`, `tlsf_check*`)**
+- [x] **Debug tooling parity (`tlsf_walk_pool`, `tlsf_check*`)**
   - **Goal**: Match TLSF’s “walk + check” capabilities (what makes TLSF easy to integrate safely).
   - **Deliverables**:
     - `typedef void (*mm_walker)(void* ptr, size_t size, int used, void* user);`
@@ -111,19 +111,19 @@ Target: memoman exposes a TLSF-like surface (namespaced as `mm_*`). Any non-TLSF
   - **Goal**: Multiple non-adjacent regions managed by one allocator instance.
   - **Requirement**: Pool boundaries must be robust (prologue/epilogue/sentinels) and never allow cross-pool coalescing.
 
-- [ ] **Pool tracking (required for TLSF-equivalent tooling)**
+- [x] **Pool tracking (required for TLSF-equivalent tooling)**
   - **Goal**: Enable `mm_get_pool`, `mm_walk_pool`, `mm_validate_pool`, and `mm_remove_pool` without ever walking across pools.
   - **Requirement**: Track pools in allocator metadata (bounded list/array) or via in-pool headers.
   - **Deliverables**:
     - O(1) pool membership check for a pointer (debug mode)
     - per-pool physical walk for tooling (never used in hot path)
 
-- [ ] **Remove pool (`mm_remove_pool`)**
+- [x] **Remove pool (`mm_remove_pool`)**
   - **Goal**: Match TLSF’s `tlsf_remove_pool` capability.
   - **Requirement**: Only allow removal when all blocks in that pool are free (or provide a strict contract).
   - **Deliverable**: Tests for “remove after full free” and “reject removal if allocated blocks exist”.
 
-- [ ] **Allocator lifecycle polish**
+- [x] **Allocator lifecycle polish**
   - **Goal**: Clear create/init story like TLSF: create, add pool, allocate, free, destroy/reset.
   - **Deliverables**:
     - `mm_init_in_place(mem, bytes)` docs and constraints

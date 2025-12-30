@@ -18,6 +18,16 @@ typedef struct tlsf_block_t {
   struct tlsf_block_t* prev_free;
 } tlsf_block_t;
 
+/* Pool tracking (must match src/memoman.c). */
+#define MM_MAX_POOLS 32
+typedef struct mm_pool_desc_t {
+  char* start;
+  char* end;
+  size_t bytes;
+  size_t live_allocations;
+  int active;
+} mm_pool_desc_t;
+
 /* The block header exposed to used blocks is a single size word. */
 #define BLOCK_HEADER_OVERHEAD sizeof(size_t)
 #define BLOCK_START_OFFSET BLOCK_HEADER_OVERHEAD
@@ -67,6 +77,7 @@ struct mm_allocator_t {
   tlsf_block_t* blocks[FL_INDEX_COUNT][SL_INDEX_COUNT];
   size_t current_free_size;
   size_t total_pool_size;
+  mm_pool_desc_t pools[MM_MAX_POOLS];
 };
 
 /* Test-only helper exposed by the implementation. */

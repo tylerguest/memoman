@@ -33,6 +33,17 @@ typedef struct tlsf_block_t {
   struct tlsf_block_t* prev_free;
 } tlsf_block_t;
 
+/* Pool tracking (bounded, O(1) scans). */
+#define MM_MAX_POOLS 32
+
+typedef struct mm_pool_desc_t {
+  char* start;
+  char* end;
+  size_t bytes;
+  size_t live_allocations;
+  int active;
+} mm_pool_desc_t;
+
 /* The block header exposed to used blocks is a single size word. */
 #define BLOCK_HEADER_OVERHEAD sizeof(size_t)
 #define BLOCK_START_OFFSET BLOCK_HEADER_OVERHEAD
@@ -83,6 +94,7 @@ struct mm_allocator_t {
   tlsf_block_t* blocks[FL_INDEX_COUNT][SL_INDEX_COUNT];
   size_t current_free_size;
   size_t total_pool_size;
+  mm_pool_desc_t pools[MM_MAX_POOLS];
 };
 
 /* === Compile-time invariants (Conte-style) === */
@@ -232,6 +244,32 @@ static void insert_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
 static inline void* block_to_user(tlsf_block_t* block) { return (void*)((char*)block + BLOCK_START_OFFSET); }
 static inline tlsf_block_t* user_to_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_START_OFFSET); }
 
+static mm_pool_desc_t* pool_desc_from_handle(mm_allocator_t* ctrl, mm_pool_t pool) {
+  if (!ctrl || !pool) return NULL;
+  uintptr_t base = (uintptr_t)&ctrl->pools[0];
+  uintptr_t end = (uintptr_t)(&ctrl->pools[MM_MAX_POOLS]);
+  uintptr_t p = (uintptr_t)pool;
+  if (p < base || p >= end) return NULL;
+  size_t off = (size_t)(p - base);
+  if ((off % sizeof(mm_pool_desc_t)) != 0) return NULL;
+  size_t idx = off / sizeof(mm_pool_desc_t);
+  if (idx >= MM_MAX_POOLS) return NULL;
+  mm_pool_desc_t* desc = &ctrl->pools[idx];
+  if (!desc->active) return NULL;
+  return desc;
+}
+
+static mm_pool_desc_t* pool_desc_for_block(mm_allocator_t* ctrl, const tlsf_block_t* block) {
+  if (!ctrl || !block) return NULL;
+  uintptr_t addr = (uintptr_t)block;
+  for (size_t i = 0; i < MM_MAX_POOLS; i++) {
+    mm_pool_desc_t* p = &ctrl->pools[i];
+    if (!p->active) continue;
+    if (addr >= (uintptr_t)p->start && addr < (uintptr_t)p->end) return p;
+  }
+  return NULL;
+}
+
 
 void mm_get_mapping_indices(size_t size, int* fl, int* sl) { mapping_insert(size, fl, sl); }
 void mm_get_mapping_search_indices(size_t size, int* fl, int* sl) { mapping_search(size, fl, sl); }
@@ -324,6 +362,12 @@ int mm_validate(mm_allocator_t* ctrl) {
 
   /* Physical walk removed as we now support discontiguous pools and don't track them all */
 
+  /* 1. Per-pool physical validation. */
+  for (size_t i = 0; i < MM_MAX_POOLS; i++) {
+    if (!ctrl->pools[i].active) continue;
+    CHECK(mm_validate_pool(ctrl, (mm_pool_t)&ctrl->pools[i]), "Pool validation failed");
+  }
+
   /* 2. Logical Free List Walk */
   for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
     for (int sl = 0; sl < TLSF_SLI_COUNT; sl++) {
@@ -368,6 +412,59 @@ int mm_validate(mm_allocator_t* ctrl) {
   return 1;
 }
 
+int mm_validate_pool(mm_allocator_t* alloc, mm_pool_t pool) {
+  if (!alloc || !pool) return 0;
+
+  mm_pool_desc_t* desc = pool_desc_from_handle(alloc, pool);
+  if (!desc) return 0;
+
+  tlsf_block_t* block = (tlsf_block_t*)desc->start;
+  tlsf_block_t* epilogue = (tlsf_block_t*)(desc->end - BLOCK_HEADER_OVERHEAD);
+
+  if ((uintptr_t)desc->start % ALIGNMENT != 0) return 0;
+  if ((uintptr_t)desc->end % ALIGNMENT != 0) return 0;
+
+  if (block_is_free(epilogue)) return 0;
+  if (block_size(epilogue) != 0) return 0;
+
+  size_t max_steps = (desc->bytes / ALIGNMENT) + 2;
+  tlsf_block_t* prev = NULL;
+  for (size_t i = 0; i < max_steps; i++) {
+    size_t sz = block_size(block);
+    if (sz == 0) break;
+
+    if ((sz % ALIGNMENT) != 0) return 0;
+    if (sz < TLSF_MIN_BLOCK_SIZE) return 0;
+
+    tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
+    if ((uintptr_t)next > (uintptr_t)epilogue) return 0;
+
+    if (block_is_prev_free(block)) {
+      if (!prev) return 0;
+      if (!block_is_free(prev)) return 0;
+      if (block_prev(block) != prev) return 0;
+    } else {
+      if (prev && block_is_free(prev)) return 0;
+    }
+
+    if (next) {
+      if (block_is_free(block)) {
+        if (!block_is_prev_free(next)) return 0;
+        if (block_prev(next) != block) return 0;
+      } else {
+        if (block_is_prev_free(next)) return 0;
+      }
+    }
+
+    prev = block;
+    block = next;
+    if ((uintptr_t)block == (uintptr_t)epilogue) break;
+  }
+
+  if ((uintptr_t)block != (uintptr_t)epilogue) return 0;
+  return 1;
+}
+
 #ifdef MM_DEBUG
 static void mm_check_integrity(mm_allocator_t* ctrl) {
   assert(mm_validate(ctrl) && "Heap integrity check failed");
@@ -400,16 +497,89 @@ mm_allocator_t* mm_create_with_pool(void* mem, size_t bytes) {
   return mm_create(mem, bytes);
 }
 
+mm_allocator_t* mm_init_in_place(void* mem, size_t bytes) {
+  return mm_create(mem, bytes);
+}
+
 void mm_destroy(mm_allocator_t* alloc) {
   /* No-op by design: caller owns all memory and core never calls OS APIs. */
   (void)alloc;
 }
 
-int mm_add_pool(mm_allocator_t* allocator, void* mem, size_t bytes) {
-  if (!allocator || !mem) return 0;
+int mm_reset(mm_allocator_t* allocator) {
+  if (!allocator) return 0;
+
+  /* Refuse to reset if the heap is already inconsistent. */
+  if (!mm_validate(allocator)) return 0;
+
+  /* Refuse to reset if any live allocation exists in any pool. */
+  for (size_t i = 0; i < MM_MAX_POOLS; i++) {
+    if (!allocator->pools[i].active) continue;
+    if (allocator->pools[i].live_allocations != 0) return 0;
+  }
+
+  allocator->fl_bitmap = 0;
+  memset(allocator->sl_bitmap, 0, sizeof(allocator->sl_bitmap));
+  memset(allocator->blocks, 0, sizeof(allocator->blocks));
+  allocator->current_free_size = 0;
+
+  for (size_t i = 0; i < MM_MAX_POOLS; i++) {
+    mm_pool_desc_t* desc = &allocator->pools[i];
+    if (!desc->active) continue;
+
+    tlsf_block_t* epilogue = (tlsf_block_t*)(desc->end - BLOCK_HEADER_OVERHEAD);
+    block_set_size(epilogue, 0);
+    block_set_used(epilogue);
+    block_set_prev_free(epilogue);
+
+    tlsf_block_t* block = (tlsf_block_t*)desc->start;
+    size_t size = (size_t)((char*)epilogue - (char*)block - BLOCK_HEADER_OVERHEAD);
+    if (size < TLSF_MIN_BLOCK_SIZE) return 0;
+
+    block->size = 0;
+    block_set_size(block, size);
+    block_set_free(block);
+    block_set_prev_used(block);
+    block_set_prev(epilogue, block);
+
+    insert_free_block(allocator, block);
+    desc->live_allocations = 0;
+  }
+
+  return mm_validate(allocator);
+}
+
+mm_pool_t mm_get_pool(mm_allocator_t* allocator) {
+  if (!allocator) return NULL;
+  for (size_t i = 0; i < MM_MAX_POOLS; i++) {
+    if (allocator->pools[i].active) return (mm_pool_t)&allocator->pools[i];
+  }
+  return NULL;
+}
+
+mm_pool_t mm_get_pool_for_ptr(mm_allocator_t* allocator, const void* ptr) {
+  if (!allocator || !ptr) return NULL;
+
+  uintptr_t user_addr = (uintptr_t)ptr;
+  if (user_addr < (uintptr_t)BLOCK_START_OFFSET) return NULL;
+
+  uintptr_t block_addr = user_addr - (uintptr_t)BLOCK_START_OFFSET;
+  if ((block_addr % (uintptr_t)ALIGNMENT) != 0) return NULL;
+
+  for (size_t i = 0; i < MM_MAX_POOLS; i++) {
+    mm_pool_desc_t* p = &allocator->pools[i];
+    if (!p->active) continue;
+    if (block_addr >= (uintptr_t)p->start && block_addr < (uintptr_t)p->end) return (mm_pool_t)p;
+  }
+
+  return NULL;
+}
+
+mm_pool_t mm_add_pool(mm_allocator_t* allocator, void* mem, size_t bytes) {
+  if (!allocator || !mem) return NULL;
 
   size_t overhead = ALIGNMENT + BLOCK_HEADER_OVERHEAD + BLOCK_HEADER_OVERHEAD;
-  if (bytes < overhead + TLSF_MIN_BLOCK_SIZE) return 0;
+  if (bytes < overhead + TLSF_MIN_BLOCK_SIZE) return NULL;
 
   uintptr_t start_addr = (uintptr_t)mem;
   uintptr_t aligned_addr = (start_addr + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
@@ -417,9 +587,24 @@ int mm_add_pool(mm_allocator_t* allocator, void* mem, size_t bytes) {
   size_t aligned_bytes = bytes - (aligned_addr - start_addr);
   
   /* Check if alignment ate too much */
-  if (aligned_bytes < overhead + TLSF_MIN_BLOCK_SIZE) return 0;
+  if (aligned_bytes < overhead + TLSF_MIN_BLOCK_SIZE) return NULL;
 
   char* pool_end = pool_start + aligned_bytes;
+
+  mm_pool_desc_t* desc = NULL;
+  for (size_t i = 0; i < MM_MAX_POOLS; i++) {
+    if (!allocator->pools[i].active) {
+      desc = &allocator->pools[i];
+      break;
+    }
+  }
+  if (!desc) return NULL;
+
+  desc->start = pool_start;
+  desc->end = pool_end;
+  desc->bytes = aligned_bytes;
+  desc->live_allocations = 0;
+  desc->active = 1;
 
   /* 1. Create Epilogue sentinel. */
   tlsf_block_t* epilogue = (tlsf_block_t*)(pool_end - BLOCK_HEADER_OVERHEAD);
@@ -444,7 +629,56 @@ int mm_add_pool(mm_allocator_t* allocator, void* mem, size_t bytes) {
   insert_free_block(allocator, block);
   allocator->total_pool_size += aligned_bytes;
   
-  return 1;
+  return (mm_pool_t)desc;
+}
+
+void mm_remove_pool(mm_allocator_t* allocator, mm_pool_t pool) {
+  if (!allocator || !pool) return;
+
+  mm_pool_desc_t* desc = pool_desc_from_handle(allocator, pool);
+  if (!desc) return;
+
+#ifdef MM_DEBUG
+  assert(desc->live_allocations == 0 && "mm_remove_pool requires the pool to have no live allocations");
+#endif
+  if (desc->live_allocations != 0) return;
+
+  tlsf_block_t* block = (tlsf_block_t*)desc->start;
+  tlsf_block_t* epilogue = (tlsf_block_t*)(desc->end - BLOCK_HEADER_OVERHEAD);
+
+  size_t max_steps = (desc->bytes / ALIGNMENT) + 2;
+  /* Preflight: refuse to remove if any used block exists (don't mutate state). */
+  for (size_t i = 0; i < max_steps; i++) {
+    size_t sz = block_size(block);
+    if (sz == 0) break;
+
+    if (!block_is_free(block)) return;
+
+    block = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
+    if ((uintptr_t)block > (uintptr_t)epilogue) return;
+  }
+
+  if ((uintptr_t)block != (uintptr_t)epilogue) return;
+
+  /* Removal: every block in the pool is free, so remove free-list nodes. */
+  block = (tlsf_block_t*)desc->start;
+  for (size_t i = 0; i < max_steps; i++) {
+    size_t sz = block_size(block);
+    if (sz == 0) break;
+
+    if (!block_is_free(block)) return;
+    remove_free_block(allocator, block);
+
+    block = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
+    if ((uintptr_t)block > (uintptr_t)epilogue) return;
+  }
+
+  allocator->total_pool_size -= desc->bytes;
+  desc->active = 0;
+  desc->start = NULL;
+  desc->end = NULL;
+  desc->bytes = 0;
+  desc->live_allocations = 0;
 }
 
 void* mm_malloc(mm_allocator_t* ctrl, size_t size) {
@@ -473,6 +707,12 @@ void* mm_malloc(mm_allocator_t* ctrl, size_t size) {
   tlsf_block_t* next = block_next_safe(ctrl, block);
   if (next) block_set_prev_used(next);
 
+  mm_pool_desc_t* pool_desc = pool_desc_for_block(ctrl, block);
+#ifdef MM_DEBUG
+  assert(pool_desc && "allocation returned a block outside any pool");
+#endif
+  if (pool_desc) pool_desc->live_allocations++;
+
   mm_check_integrity(ctrl);
   return block_to_user(block);
 }
@@ -492,6 +732,12 @@ void mm_free(mm_allocator_t* ctrl, void* ptr) {
     // fprintf(stderr, "[Memoman] Warning: Double free detected for %p\n", ptr);
     return;
   }
+
+  mm_pool_desc_t* pool_desc = pool_desc_for_block(ctrl, block);
+#ifdef MM_DEBUG
+  assert(pool_desc && pool_desc->live_allocations > 0);
+#endif
+  if (pool_desc && pool_desc->live_allocations > 0) pool_desc->live_allocations--;
 
   block_mark_as_free(ctrl, block);
   block = coalesce(ctrl, block);
@@ -671,6 +917,12 @@ void* mm_memalign(mm_allocator_t* ctrl, size_t alignment, size_t size) {
     block_set_prev_used(next);
   }
 
+  mm_pool_desc_t* pool_desc = pool_desc_for_block(ctrl, aligned_block);
+#ifdef MM_DEBUG
+  assert(pool_desc && "memalign returned a block outside any pool");
+#endif
+  if (pool_desc) pool_desc->live_allocations++;
+
   mm_check_integrity(ctrl);
   return block_to_user(aligned_block);
 }
@@ -679,4 +931,45 @@ size_t mm_block_size(void* ptr) {
   if (!ptr) return 0;
   tlsf_block_t* block = user_to_block(ptr);
   return block_size(block);
+}
+
+size_t mm_size(void) { return sizeof(mm_allocator_t); }
+size_t mm_align_size(void) { return ALIGNMENT; }
+size_t mm_block_size_min(void) { return TLSF_MIN_BLOCK_SIZE; }
+
+size_t mm_block_size_max(void) {
+  /* Must be < BLOCK_SIZE_MAX and remain aligned after rounding. */
+  return BLOCK_SIZE_MAX - ALIGNMENT;
+}
+
+size_t mm_pool_overhead(void) {
+  /* Worst-case internal overhead of adding a pool (includes alignment slop). */
+  return ALIGNMENT + (2 * BLOCK_HEADER_OVERHEAD);
+}
+
+size_t mm_alloc_overhead(void) {
+  /* Returned pointer is immediately after the size word. */
+  return BLOCK_START_OFFSET;
+}
+
+void mm_walk_pool(mm_pool_t pool, mm_walker walker, void* user) {
+  if (!pool || !walker) return;
+  mm_pool_desc_t* desc = (mm_pool_desc_t*)pool;
+  if (!desc->active) return;
+
+  tlsf_block_t* block = (tlsf_block_t*)desc->start;
+  tlsf_block_t* epilogue = (tlsf_block_t*)(desc->end - BLOCK_HEADER_OVERHEAD);
+
+  size_t max_steps = (desc->bytes / ALIGNMENT) + 2;
+  for (size_t i = 0; i < max_steps; i++) {
+    size_t sz = block_size(block);
+    if (sz == 0) break;
+
+    int used = block_is_free(block) ? 0 : 1;
+    walker(block_to_user(block), sz, used, user);
+
+    tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
+    if ((uintptr_t)next > (uintptr_t)epilogue) break;
+    block = next;
+  }
 }

@@ -18,7 +18,7 @@ static int test_allocation_across_pools(void) {
 
   /* Add Pool 2: 8KB */
   uint8_t pool2[8192] __attribute__((aligned(8)));
-  mm_add_pool(alloc, pool2, sizeof(pool2));
+  ASSERT_NOT_NULL(mm_add_pool(alloc, pool2, sizeof(pool2)));
 
   /* Now alloc should succeed (from Pool 2) */
   p2 = (mm_malloc)(alloc, 3000);
