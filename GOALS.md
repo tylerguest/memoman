@@ -76,7 +76,7 @@ Get to a point where someone can swap your allocator in where they’d use TLSF 
 
 Target: memoman exposes a TLSF-like surface (namespaced as `mm_*`). Any non-TLSF convenience APIs should be clearly labeled as memoman extensions.
 
-- [ ] **Lifecycle parity (`tlsf_create*`, `tlsf_destroy`)**
+- [x] **Lifecycle parity (`tlsf_create*`, `tlsf_destroy`)**
   - **Goal**: Make lifecycle semantics as boring and explicit as TLSF.
   - **Deliverables**:
     - `mm_destroy(mm_allocator_t*)` (no-op allowed, but defined)

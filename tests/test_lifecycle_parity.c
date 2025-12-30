@@ -6,6 +6,16 @@ static int test_destroy_null_noop(void) {
   return 1;
 }
 
+static int test_create_in_place(void) {
+  uint8_t pool[64 * 1024] __attribute__((aligned(16)));
+  mm_allocator_t* alloc = mm_create(pool, sizeof(pool));
+  ASSERT_NOT_NULL(alloc);
+  ASSERT_EQ((void*)alloc, (void*)pool);
+  ASSERT((mm_validate)(alloc));
+  (mm_destroy)(alloc);
+  return 1;
+}
+
 static int test_create_with_pool_smoke(void) {
   uint8_t pool[64 * 1024] __attribute__((aligned(16)));
   mm_allocator_t* alloc = (mm_create_with_pool)(pool, sizeof(pool));
@@ -36,11 +46,20 @@ static int test_create_requires_alignment(void) {
   return 1;
 }
 
+static int test_create_requires_minimum_size(void) {
+  uint8_t pool[128] __attribute__((aligned(16)));
+  mm_allocator_t* alloc = mm_create(pool, sizeof(pool));
+  ASSERT_NULL(alloc);
+  return 1;
+}
+
 int main(void) {
   TEST_SUITE_BEGIN("lifecycle_parity");
   RUN_TEST(test_destroy_null_noop);
+  RUN_TEST(test_create_in_place);
   RUN_TEST(test_create_with_pool_smoke);
   RUN_TEST(test_create_requires_alignment);
+  RUN_TEST(test_create_requires_minimum_size);
   TEST_SUITE_END();
   TEST_MAIN_END();
 }

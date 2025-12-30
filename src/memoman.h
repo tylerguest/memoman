@@ -2,9 +2,17 @@
 #define INCLUDED_memoman
 
 /*
-** Memoman: deterministic, pool-based TLSF allocator (TLSF 3.1 semantics).
-** Core never calls OS allocation APIs; caller owns all memory.
-*/
+** memoman: deterministic, pool-based TLSF allocator (TLSF 3.1 semantics).
+**
+** Ownership model (TLSF-style):
+** - The caller provides all memory (one or more pools).
+** - The allocator never allocates or frees OS memory.
+** - `mm_destroy()` never frees memory; the caller frees the backing buffers.
+**
+** Alignment rules:
+** - `mm_create()` / `mm_create_with_pool()` require `mem` to be aligned to `sizeof(size_t)`.
+** - `mm_add_pool()` accepts any `mem` pointer; it internally aligns the pool start up to `sizeof(size_t)` (this may reduce usable bytes).
+ */
 
 #include <stddef.h>
 
@@ -14,12 +22,26 @@ extern "C" {
 
 typedef struct mm_allocator_t mm_allocator_t;
 
-/* Create/destroy an allocator instance (in-place). */
+/*
+** Create/destroy an allocator instance (in-place).
+**
+** `mm_create()` initializes an allocator control structure at the start of `mem`
+** and uses the remaining bytes as the initial pool.
+**
+** Returns NULL on failure (insufficient space, misalignment).
+*/
 mm_allocator_t* mm_create(void* mem, size_t bytes);
+
+/* TLSF-style symmetry alias of `mm_create()`. */
 mm_allocator_t* mm_create_with_pool(void* mem, size_t bytes);
+
+/* No-op by design (caller owns memory). Safe to call with NULL. */
 void mm_destroy(mm_allocator_t* alloc);
 
-/* Add pools. */
+/*
+** Add a discontiguous pool to an existing allocator.
+** Returns nonzero on success, 0 on failure (insufficient size, etc.).
+*/
 int mm_add_pool(mm_allocator_t* alloc, void* mem, size_t bytes);
 
 /* malloc/memalign/realloc/free replacements. */
