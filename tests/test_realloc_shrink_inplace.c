@@ -1,5 +1,6 @@
 #include "test_framework.h"
 #include "../src/memoman.h"
+#include "memoman_test_internal.h"
 #include <string.h>
 
 /* === In-Place Shrink Tests === */
@@ -58,8 +59,6 @@ static int shrink_large_to_small_same_pointer(void) {
 static int shrink_creates_free_space(void) {
   mm_reset_allocator();
   
-  size_t free_before = mm_get_free_space();
-
   /* Allocate large block */
   void* ptr = mm_malloc(4096);
   ASSERT_NOT_NULL(ptr);
@@ -69,10 +68,13 @@ static int shrink_creates_free_space(void) {
   ASSERT_NOT_NULL(new_ptr);
   ASSERT_EQ(new_ptr, ptr);
 
-  size_t free_after = mm_get_free_space();
-
-  /* Should have more free space now */
-  ASSERT_GT(free_after, free_before - 4096);
+  tlsf_block_t* used = (tlsf_block_t*)((char*)new_ptr - BLOCK_START_OFFSET);
+  size_t used_size = used->size & TLSF_SIZE_MASK;
+  tlsf_block_t* next = (tlsf_block_t*)((char*)used + BLOCK_HEADER_OVERHEAD + used_size);
+  ASSERT(next != NULL);
+  ASSERT(next->size & TLSF_BLOCK_FREE);
+  ASSERT_GE((next->size & TLSF_SIZE_MASK), TLSF_MIN_BLOCK_SIZE);
+  ASSERT(mm_validate());
 
   mm_free(new_ptr);
   return 1;

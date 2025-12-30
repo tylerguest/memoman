@@ -1,18 +1,9 @@
-#ifndef MEMOMAN_H
-#define MEMOMAN_H
+#ifndef INCLUDED_memoman
+#define INCLUDED_memoman
 
 /*
-** Memoman allocator public API (pool-based, deterministic, O(1)).
-**
-** Usage model:
-** - Caller provides memory (one or more pools).
-** - Core never calls OS allocation APIs.
-** - All allocations are relative to a specific allocator instance.
-**
-** TLSF 3.1 layout note:
-** - The returned user pointer is immediately after the size word.
-** - When a block is free, free-list pointers are stored in the user payload.
-** - The prev-physical pointer of a block is stored in the previous block's payload.
+** Memoman: deterministic, pool-based TLSF allocator (TLSF 3.1 semantics).
+** Core never calls OS allocation APIs; caller owns all memory.
 */
 
 #include <stddef.h>
@@ -23,21 +14,24 @@ extern "C" {
 
 typedef struct mm_allocator_t mm_allocator_t;
 
-/* Lifecycle / pools */
+/* Create/destroy an allocator instance (in-place). */
 mm_allocator_t* mm_create(void* mem, size_t bytes);
+mm_allocator_t* mm_create_with_pool(void* mem, size_t bytes);
+void mm_destroy(mm_allocator_t* alloc);
+
+/* Add pools. */
 int mm_add_pool(mm_allocator_t* alloc, void* mem, size_t bytes);
 
-/* Allocation */
+/* malloc/memalign/realloc/free replacements. */
 void* mm_malloc(mm_allocator_t* alloc, size_t size);
-void  mm_free(mm_allocator_t* alloc, void* ptr);
-void* mm_calloc(mm_allocator_t* alloc, size_t nmemb, size_t size);
-void* mm_realloc(mm_allocator_t* alloc, void* ptr, size_t size);
 void* mm_memalign(mm_allocator_t* alloc, size_t alignment, size_t size);
+void* mm_realloc(mm_allocator_t* alloc, void* ptr, size_t size);
+void  mm_free(mm_allocator_t* alloc, void* ptr);
 
-/* Introspection */
-size_t mm_usable_size(mm_allocator_t* alloc, void* ptr);
-size_t mm_free_space(mm_allocator_t* alloc);
-size_t mm_total_allocated(mm_allocator_t* alloc);
+/* Returns internal block size, not original request size. */
+size_t mm_block_size(void* ptr);
+
+/* Debugging. Returns nonzero if internal consistency checks pass. */
 int mm_validate(mm_allocator_t* alloc);
 
 #if defined(__cplusplus)

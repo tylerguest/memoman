@@ -10,6 +10,7 @@ TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)
 TEST_BINS = $(patsubst $(TEST_DIR)/%.c, $(BIN_DIR)/%, $(TEST_SRCS))
 
 .PHONY: all clean debug benchmark run
+.PHONY: demo
 
 all: $(TEST_BINS)
 	@echo "Built with debug output enabled"
@@ -31,6 +32,9 @@ debug: all
 benchmark: CFLAGS = $(BASE_FLAGS) -O3 -DNDEBUG
 benchmark: clean $(TEST_BINS)
 	@echo "Built with optimizations for benchmarking"
+
+demo: demo.c $(SRC)
+	$(CC) $(BASE_FLAGS) -O2 -DNDEBUG -o demo demo.c $(SRC)
 
 run: $(TEST_BINS)
 	@echo "=== Running All Tests ==="

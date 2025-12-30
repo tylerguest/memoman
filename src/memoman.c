@@ -396,6 +396,15 @@ mm_allocator_t* mm_create(void* mem, size_t bytes) {
   return allocator;
 }
 
+mm_allocator_t* mm_create_with_pool(void* mem, size_t bytes) {
+  return mm_create(mem, bytes);
+}
+
+void mm_destroy(mm_allocator_t* alloc) {
+  /* No-op by design: caller owns all memory and core never calls OS APIs. */
+  (void)alloc;
+}
+
 int mm_add_pool(mm_allocator_t* allocator, void* mem, size_t bytes) {
   if (!allocator || !mem) return 0;
 
@@ -491,14 +500,6 @@ void mm_free(mm_allocator_t* ctrl, void* ptr) {
   mm_check_integrity(ctrl);
 }
 
-void* mm_calloc(mm_allocator_t* ctrl, size_t nmemb, size_t size) {
-  if (nmemb != 0 && size > SIZE_MAX / nmemb) return NULL;
-  size_t total = nmemb * size;
-  void* p = mm_malloc(ctrl, total);
-  if (p) memset(p, 0, total);
-  return p;
-}
-
 static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
   if (!ctrl) return -1;
   mm_check_integrity(ctrl);
@@ -569,7 +570,7 @@ void* mm_realloc(mm_allocator_t* ctrl, void* ptr, size_t size) {
   /* Status 1: Needs move */
   void* new_ptr = mm_malloc(ctrl, size);
   if (new_ptr) {
-    size_t old_usable = mm_usable_size(ctrl, ptr);
+    size_t old_usable = block_size(user_to_block(ptr));
     memcpy(new_ptr, ptr, (old_usable < size) ? old_usable : size);
     mm_free(ctrl, ptr);
   }
@@ -674,22 +675,8 @@ void* mm_memalign(mm_allocator_t* ctrl, size_t alignment, size_t size) {
   return block_to_user(aligned_block);
 }
 
-size_t mm_usable_size(mm_allocator_t* allocator, void* ptr) {
-  if (!allocator || !ptr) return 0;
-
-  /* Main heap blocks */
-  if ((uintptr_t)ptr % ALIGNMENT != 0) return 0;
+size_t mm_block_size(void* ptr) {
+  if (!ptr) return 0;
   tlsf_block_t* block = user_to_block(ptr);
-  if (block_is_free(block)) return 0;
   return block_size(block);
-}
-
-size_t mm_free_space(mm_allocator_t* allocator) {
-  if (!allocator) return 0;
-  return allocator->current_free_size;
-}
-
-size_t mm_total_allocated(mm_allocator_t* allocator) {
-  if (!allocator) return 0;
-  return allocator->total_pool_size - allocator->current_free_size;
 }

@@ -2,28 +2,6 @@
 #include "../src/memoman.h"
 #include <stdint.h>
 
-static int test_add_pool_basic(void) {
-  /* Create allocator with small initial pool */
-  /* Needs to be large enough for mm_allocator_t (~8KB) + overhead */
-  uint8_t pool1[12288] __attribute__((aligned(8)));
-  mm_allocator_t* alloc = mm_create(pool1, sizeof(pool1));
-  ASSERT_NOT_NULL(alloc);
-
-  size_t initial_free = mm_free_space(alloc);
-
-  /* Add second pool */
-  uint8_t pool2[4096] __attribute__((aligned(8)));
-  int res = mm_add_pool(alloc, pool2, sizeof(pool2));
-  ASSERT_EQ(res, 1);
-
-  /* Free space should increase */
-  size_t new_free = mm_free_space(alloc);
-  ASSERT_GT(new_free, initial_free);
-  ASSERT_GT(new_free, initial_free + 3000); /* Should add significant space */
-
-  return 1;
-}
-
 static int test_allocation_across_pools(void) {
   /* Pool 1: ~12KB. 
    * mm_allocator_t takes ~8KB, leaving ~4KB for allocation. */
@@ -62,7 +40,6 @@ int main(void) {
    */
   printf("\n" COLOR_BOLD "=== Discontiguous Pools ===" COLOR_RESET "\n");
   
-  RUN_TEST(test_add_pool_basic);
   RUN_TEST(test_allocation_across_pools);
   
   TEST_MAIN_END();

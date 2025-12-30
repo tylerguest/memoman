@@ -300,7 +300,7 @@ static int run_prefix(
       const uint8_t pat = (uint8_t)(xorshift32(&seed) & 0xff);
 
       if (mp) {
-        const size_t mu = (mm_usable_size)(mm, mp);
+        const size_t mu = (mm_block_size)(mp);
         if (mu < op->size) {
           *fail_out = i;
           snprintf(fail_msg, 256, "memoman usable too small (mu=%zu req=%zu)", mu, op->size);
@@ -338,7 +338,7 @@ static int run_prefix(
       }
 
       if (strict && mp && tp) {
-        const size_t mu = (mm_usable_size)(mm, mp);
+        const size_t mu = (mm_block_size)(mp);
         const size_t tu = tlsf_block_size(tp);
         if (mu != tu) {
           *fail_out = i;
@@ -373,7 +373,7 @@ static int run_prefix(
       const uint8_t pat = (uint8_t)(xorshift32(&seed) & 0xff);
 
       if (mp) {
-        const size_t mu = (mm_usable_size)(mm, mp);
+        const size_t mu = (mm_block_size)(mp);
         if (mu < op->size) {
           *fail_out = i;
           snprintf(fail_msg, 256, "memoman memalign usable too small (mu=%zu req=%zu)", mu, op->size);
@@ -411,7 +411,7 @@ static int run_prefix(
       }
 
       if (strict && mp && tp) {
-        const size_t mu = (mm_usable_size)(mm, mp);
+        const size_t mu = (mm_block_size)(mp);
         const size_t tu = tlsf_block_size(tp);
         if (mu != tu) {
           *fail_out = i;
@@ -467,7 +467,7 @@ static int run_prefix(
       }
 
       if (mp) {
-        const size_t mu = (mm_usable_size)(mm, mp);
+        const size_t mu = (mm_block_size)(mp);
         if (mu < op->size) {
           *fail_out = i;
           snprintf(fail_msg, 256, "memoman realloc usable too small (mu=%zu req=%zu)", mu, op->size);
@@ -509,7 +509,7 @@ static int run_prefix(
       }
 
       if (strict && mp && tp) {
-        const size_t mu = (mm_usable_size)(mm, mp);
+        const size_t mu = (mm_block_size)(mp);
         const size_t tu = tlsf_block_size(tp);
         if (mu != tu) {
           *fail_out = i;

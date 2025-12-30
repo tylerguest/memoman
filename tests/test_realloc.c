@@ -8,7 +8,7 @@ static int null_is_malloc(void) {
   void* ptr = mm_realloc(NULL, 100);
   ASSERT_NOT_NULL(ptr);
 
-  size_t usable = mm_malloc_usable_size(ptr);
+  size_t usable = (mm_block_size)(ptr);
   ASSERT_GE(usable, 100);
 
   mm_free(ptr);
@@ -102,7 +102,7 @@ static int grow_small_to_medium(void) {
   void* new_ptr = mm_realloc(ptr, 1024);
   ASSERT_NOT_NULL(new_ptr);
 
-  size_t usable = mm_malloc_usable_size(new_ptr);
+  size_t usable = (mm_block_size)(new_ptr);
   ASSERT_GE(usable, 1024);
 
   mm_free(new_ptr);
@@ -116,7 +116,7 @@ static int shrink_medium_to_small(void) {
   void* new_ptr = mm_realloc(ptr, 64);
   ASSERT_NOT_NULL(new_ptr);
 
-  size_t usable = mm_malloc_usable_size(new_ptr);
+  size_t usable = (mm_block_size)(new_ptr);
   ASSERT_GE(usable, 64);
 
   mm_free(new_ptr);
@@ -131,7 +131,7 @@ static int grow_to_large_block(void) {
   void* new_ptr = mm_realloc(ptr, 2 * 1024 * 1024);
   ASSERT_NOT_NULL(new_ptr);
 
-  size_t usable = mm_malloc_usable_size(new_ptr);
+  size_t usable = (mm_block_size)(new_ptr);
   ASSERT_GE(usable, 2 * 1024 * 1024);
 
   mm_free(new_ptr);
@@ -146,7 +146,7 @@ static int shrink_from_large_block(void) {
   void* new_ptr = mm_realloc(ptr, 100);
   ASSERT_NOT_NULL(new_ptr);
 
-  size_t usable = mm_malloc_usable_size(new_ptr);
+  size_t usable = (mm_block_size)(new_ptr);
   ASSERT_GE(usable, 100);
 
   mm_free(new_ptr);
@@ -389,7 +389,7 @@ static int failure_leaves_original(void) {
   memset(ptr, 0xBB, 100);
 
   /* Original pointer should still be valid */
-  ASSERT_EQ(mm_malloc_usable_size(ptr), mm_malloc_usable_size(ptr));
+  ASSERT_EQ((mm_block_size)(ptr), (mm_block_size)(ptr));
 
   mm_free(ptr);
   return 1;
@@ -404,7 +404,7 @@ static int grow(size_t size) {
   void* new_ptr = mm_realloc(ptr, size * 2);
   ASSERT_NOT_NULL(new_ptr);
 
-  size_t usable = mm_malloc_usable_size(new_ptr);
+  size_t usable = (mm_block_size)(new_ptr);
   ASSERT_GE(usable, size * 2);
 
   mm_free(new_ptr);
@@ -420,7 +420,7 @@ static int shrink(size_t size) {
   void* new_ptr = mm_realloc(ptr, size / 2);
   ASSERT_NOT_NULL(new_ptr);
 
-  size_t usable = mm_malloc_usable_size(new_ptr);
+  size_t usable = (mm_block_size)(new_ptr);
   ASSERT_GE(usable, size / 2);
 
   mm_free(new_ptr);

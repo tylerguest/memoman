@@ -5,12 +5,13 @@ static int test_simple_double_free(void) {
   TEST_RESET();
   void* p1 = mm_malloc(64);
   ASSERT_NOT_NULL(p1);
-  size_t free_before = mm_get_free_space();
   mm_free(p1);
-  size_t free_after = mm_get_free_space();
-  ASSERT_GT(free_after, free_before);
+  ASSERT(mm_validate());
   mm_free(p1); /* Double free */
-  ASSERT_EQ(mm_get_free_space(), free_after);
+  ASSERT(mm_validate());
+  void* p2 = mm_malloc(64);
+  ASSERT_NOT_NULL(p2);
+  mm_free(p2);
   return 1;
 }
 

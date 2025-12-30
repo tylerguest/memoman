@@ -69,7 +69,7 @@ Get to a point where someone can swap your allocator in where they’d use TLSF 
 - `tlsf_malloc` / `tlsf_free` → `mm_malloc` / `mm_free`
 - `tlsf_realloc` → `mm_realloc`
 - `tlsf_memalign` → `mm_memalign`
-- `tlsf_block_size` → `mm_usable_size` (usable payload, not original request size)
+- `tlsf_block_size` → `mm_block_size` (usable payload, not original request size)
 - `tlsf_walk_pool` → `mm_walk_pool`
 - `tlsf_check` / `tlsf_check_pool` → `mm_validate` / `mm_validate_pool`
 - `tlsf_size`, `tlsf_align_size`, `tlsf_block_size_min/max`, `tlsf_pool_overhead`, `tlsf_alloc_overhead`
@@ -217,7 +217,7 @@ Once correctness is solid, tune toward “Conte-like” throughput and predictab
     - minimum block size (and why)
     - alignment defaults/config
     - pool removal support (if not implemented)
-    - which public APIs are TLSF-equivalent vs memoman extensions (`mm_calloc`, `mm_free_space`, `mm_total_allocated`, etc.)
+    - which public APIs are TLSF-equivalent vs memoman extensions (if any are added later)
 
 ## Phase 7: Surpass Conte (Only After Parity)
 

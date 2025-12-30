@@ -1,50 +1,75 @@
-<img src="memoman.png" alt="Memoman" width=50% />
+<img src="memoman.png" alt="Memoman" width=75% />
 
-A custom memory allocator implementing the Two-Level Segregated Fit (TLSF) algorithm.
+# memoman
+
+`memoman` is a pool-based TLSF allocator targeting **TLSF 3.1 semantics** (Matthew Conte’s TLSF 3.1).
+
+Core principles:
+- Core **never calls OS allocation APIs**. The allocator manages memory you provide.
+- Operations are **O(1)** (bounded by FL/SL bitmap sizes, not heap size).
+- Block layout matches TLSF 3.1: user payload starts immediately after the size word; free-list pointers live in the payload when free.
+
+Roadmap and parity goals live in `GOALS.md`.
 
 ## Features
 
-- **TLSF Algorithm**: O(1) malloc/free via two-level bitmap indexing across 30×32 segregated free lists
-- **16-byte alignment** for all allocations
-- **Immediate coalescing** with boundary-tagged blocks for bidirectional traversal
-- **Reserve-then-commit heap**: Pre-reserves 1GB virtual address space, commits on-demand via `mprotect`
-- **Large allocation bypass**: Direct `mmap` for allocations ≥1MB to reduce fragmentation
-- **Double-free detection** and heap bounds validation
-- **In-place realloc**: Grows/shrinks blocks without copying when possible
+- TLSF-style two-level bitmaps and segregated free lists (O(1) search/insert/remove).
+- Discontiguous pools (`mm_add_pool`) in a single allocator instance.
+- Immediate coalescing and correct prev-physical linkage (TLSF 3.1 semantics).
+- `mm_memalign` with Conte-style gap handling.
+- Internal validation (`mm_validate`) and a differential parity test against Conte TLSF (`tests/test_parity_conte.c`).
 
-## Build
+## Quick Build & Test
 
 ```bash
-git clone https://github.com/tylerguest/memoman.git
-cd memoman
-make all         # build tests (default)
-make debug       # enable extra debug logging
-make benchmark   # optimized benchmark build
+make run          # build + run all tests
+make benchmark    # optimized build (for benchmark suite)
+./tests/bin/benchmark_suite
 ```
 
-## Testing
+## Using It
+
+`memoman` is a small single-translation-unit library: add `src/memoman.c` to your build and include `src/memoman.h`.
+
+### Compile
 
 ```bash
-make run                # run all tests
-./tests/bin/test_*      # run individual tests
+make demo
+./demo
 ```
 
-## Benchmark
+### Minimal Example
 
+```c
+#include "memoman.h"
+#include <stdint.h>
+
+int main(void) {
+  static uint8_t arena[1024 * 1024] __attribute__((aligned(16)));
+
+  mm_allocator_t* mm = mm_create(arena, sizeof(arena));
+  if (!mm) return 1;
+
+  void* p = mm_malloc(mm, 128);
+  if (!p) return 1;
+
+  p = mm_realloc(mm, p, 256);
+  mm_free(mm, p);
+
+  if (!mm_validate(mm)) return 1;
+  mm_destroy(mm); /* no-op by design */
+  return 0;
+}
 ```
-=== Allocator Benchmark Comparison ===
-Testing 1000000 operations per trial, 5 trials...
 
-=== AVERAGED RESULTS ===
-memoman:            0.037940 seconds
-glibc malloc:       0.058137 seconds
-Difference:         1.53x faster
+### Multiple Pools
 
-Operations per second:
-memoman:            26,357,475 ops/sec
-glibc malloc:       17,200,652 ops/sec
+```c
+uint8_t pool1[64 * 1024] __attribute__((aligned(16)));
+uint8_t pool2[64 * 1024] __attribute__((aligned(16)));
 
-(Results vary by hardware, compiler, and workload.)
+mm_allocator_t* mm = mm_create(pool1, sizeof(pool1));
+mm_add_pool(mm, pool2, sizeof(pool2));
 ```
 
 ## API
@@ -52,24 +77,26 @@ glibc malloc:       17,200,652 ops/sec
 ```c
 #include "memoman.h"
 
-void* mm_malloc(size_t size);
-void  mm_free(void* ptr);
-void* mm_calloc(size_t nmemb, size_t size);
-void* mm_realloc(void* ptr, size_t size);
-size_t mm_get_usable_size(void* ptr);
+/* Create/destroy. All memory is caller-owned. */
+mm_allocator_t* mm_create(void* mem, size_t bytes);
+mm_allocator_t* mm_create_with_pool(void* mem, size_t bytes);
+void mm_destroy(mm_allocator_t* alloc);
 
-void   reset_allocator(void);
-size_t get_total_allocated(void);
-size_t get_free_space(void);
+/* Add pools. */
+int mm_add_pool(mm_allocator_t* alloc, void* mem, size_t bytes);
+
+/* malloc/memalign/realloc/free replacements. */
+void* mm_malloc(mm_allocator_t* alloc, size_t size);
+void* mm_memalign(mm_allocator_t* alloc, size_t alignment, size_t size);
+void* mm_realloc(mm_allocator_t* alloc, void* ptr, size_t size);
+void  mm_free(mm_allocator_t* alloc, void* ptr);
+
+/* Returns internal block size, not original request size. */
+size_t mm_block_size(void* ptr);
+
+/* Debugging. Returns nonzero if internal consistency checks pass. */
+int mm_validate(mm_allocator_t* alloc);
 ```
-
-## Design Overview
-
-- **TLSF Control Structure**: Two-level bitmap enables O(1) block lookup
-- **Block Headers**: Store size + flags (free/prev_free) in LSBs, boundary tags for backward traversal
-- **Segregated Free Lists**: 30 first-level × 32 second-level bins for good-fit allocation
-- **Heap Growth**: Uses `mmap` with `PROT_NONE` + `mprotect` to grow without relocating pointers
-- **Large Blocks**: Allocations ≥1MB use dedicated `mmap` with magic number tracking
 
 ## Structure
 
@@ -79,21 +106,9 @@ size_t get_free_space(void);
 ├── README.md
 ├── src/
 │   ├── memoman.c
-│   ├── memoman.h
-│   └── mmdebug.c
+│   └── memoman.h
 └── tests/
-    ├── test_*.c      # 20+ unit tests
-    └── bin/          # compiled test binaries
+    ├── test_*.c              # unit tests + parity harness
+    ├── memoman_test_internal.h
+    └── bin/                  # compiled test binaries
 ```
-
-## Test Coverage
-
-| Test | Description |
-|------|-------------|
-| `test_alignment` | Verifies 16-byte alignment |
-| `test_coalescing` | Block merging (left/right/both) |
-| `test_double_free` | Double-free detection |
-| `test_realloc` | In-place grow/shrink |
-| `test_mmap` | Large allocation handling |
-| `test_benchmark` | Performance comparison |
-| ... | 15+ additional edge case tests |

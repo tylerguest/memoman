@@ -38,11 +38,7 @@ static inline void _test_destroy(void) {
 #define mm_destroy() _test_destroy()
 #define mm_malloc(s) (mm_malloc)(_test_allocator, (s))
 #define mm_free(p) (mm_free)(_test_allocator, (p))
-#define mm_calloc(n, s) (mm_calloc)(_test_allocator, (n), (s))
 #define mm_realloc(p, s) (mm_realloc)(_test_allocator, (p), (s))
-#define mm_get_free_space() (mm_free_space)(_test_allocator)
-#define mm_malloc_usable_size(p) (mm_usable_size)(_test_allocator, (p))
-#define mm_get_total_allocated() (mm_total_allocated)(_test_allocator)
 #define mm_validate() (mm_validate)(_test_allocator)
 #define mm_reset_allocator() do { _test_destroy(); _test_init(); } while(0)
 

@@ -29,7 +29,7 @@ static int test_free_links_live_in_payload(void) {
   ASSERT_NOT_NULL(ptr);
 
   tlsf_block_t* block = (tlsf_block_t*)((char*)ptr - BLOCK_START_OFFSET);
-  size_t usable_before = mm_malloc_usable_size(ptr);
+  size_t usable_before = (mm_block_size)(ptr);
 
   mm_free(ptr);
 
