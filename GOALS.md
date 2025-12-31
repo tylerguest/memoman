@@ -9,7 +9,14 @@ Repo policy:
 - Hot-path operations must remain **O(1)** (bounded by FL/SL parameters, never proportional to heap size).
 - Validation/walk tooling may be O(n) in block count (debug and tooling paths only).
 - We do not vendor third-party TLSF sources into this repo; parity testing against other TLSF implementations is
-  supported as an out-of-tree/dev-only harness.
+  supported as a dev-only harness that builds only when a local implementation is present (e.g. `./matt_conte`, gitignored).
+
+## Current Status (Already Implemented)
+
+- **Core invariants**: TLSF 3.1 block layout + prev-phys linkage; derived minimum block size; mapping/search; pool tracking/handles.
+- **TLSF-style tooling**: pool handles, `mm_walk_pool`, `mm_validate`/`mm_validate_pool`, pool add/remove safety checks.
+- **Testing**: unit tests + deterministic stress tests; long-running soak/RT-ish soak with live stats and max latency tracking.
+- **Performance compare**: one-command comparison runs are available (memoman vs malloc, and optionally memoman vs Conte TLSF if `./matt_conte` exists).
 
 ## What “TLSF 3.1-Equivalent” Means
 
@@ -24,14 +31,15 @@ We’re “equivalent” when these are true:
 “Better than TLSF 3.1” comes only after parity, and should be **additive** (stronger validation, better determinism
 tooling, nicer integration), never at the expense of correctness or O(1) guarantees.
 
-## Phase 0: Prove Parity (Dev-Only, Out-of-Tree)
+## Phase 0: Prove Parity (Dev-Only Harness)
 
-- [ ] **Differential parity harness (out-of-tree)**
-  - **Goal**: Make regressions obvious by running the same operation stream against a known TLSF implementation.
+- [ ] **Functional differential parity harness (memoman vs Conte TLSF)**
+  - **Goal**: Make regressions obvious by running the same operation stream against Conte TLSF for behavior parity.
   - **Requirements**:
     - fixed seed, deterministic operation generator
     - “shrinkable” failures (log the minimal reproducer)
-    - build only if an external TLSF implementation is present locally
+    - build only if an external TLSF implementation is present locally (`./matt_conte`, gitignored)
+    - compare correctness properties (success/failure, alignment, realloc data preservation, etc.), not throughput
 
 - [ ] **Strict parity mode passes**
   - **Goal**: Make strict behavior parity mode pass for representative workloads (then enable it by default in the dev harness).
@@ -42,10 +50,10 @@ Get to a point where someone can swap your allocator in where they’d use TLSF 
 
 ### API Equivalence Map (Conte → memoman)
 
-- `tlsf_create` → `mm_create` (in-place init of allocator control struct)
-- `tlsf_create_with_pool` → `mm_create` (current model: control + initial pool in one buffer)
+- `tlsf_create` → `mm_create` (TODO: make `mm_create` control-only; currently it also consumes the remaining bytes as the first pool)
+- `tlsf_create_with_pool` → `mm_create_with_pool` (in-place init in a single backing buffer)
 - `tlsf_destroy` → `mm_destroy` (likely a no-op; caller owns memory)
-- `tlsf_get_pool` → `mm_get_pool` (define “primary pool” semantics)
+- `tlsf_get_pool` → `mm_get_pool` (returns a “primary” pool handle)
 - `tlsf_add_pool` → `mm_add_pool` (should return a `mm_pool_t` handle like TLSF)
 - `tlsf_remove_pool` → `mm_remove_pool`
 - `tlsf_malloc` / `tlsf_free` → `mm_malloc` / `mm_free`
@@ -56,6 +64,13 @@ Get to a point where someone can swap your allocator in where they’d use TLSF 
 - `tlsf_check` / `tlsf_check_pool` → `mm_validate` / `mm_validate_pool`
 - `tlsf_size`, `tlsf_align_size`, `tlsf_block_size_min/max`, `tlsf_pool_overhead`, `tlsf_alloc_overhead`
   → `mm_size`, `mm_align_size`, `mm_block_size_min/max`, `mm_pool_overhead`, `mm_alloc_overhead`
+
+- [ ] **TLSF-style create semantics**
+  - **Goal**: Make `mm_create` match TLSF’s `tlsf_create` semantics (control-only).
+  - **Deliverables**:
+    - `mm_create` initializes control only (no implicit pool consumption)
+    - `mm_create_with_pool` stays as the convenience API for single-buffer usage
+    - tests for both creation styles and their failure modes
 
 - [ ] **Return-code semantics parity**
   - **Goal**: Make it trivially obvious (from return values alone) whether checks passed, like TLSF’s `tlsf_check*`.

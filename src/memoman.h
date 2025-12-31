@@ -25,6 +25,16 @@ extern "C" {
 typedef struct mm_allocator_t mm_allocator_t;
 typedef void* mm_pool_t;
 
+/*
+** TLSF-style handle type aliases.
+**
+** Notes:
+** - Conte’s `tlsf_t` is a `void*` handle; memoman uses an opaque struct pointer for stronger type checking.
+** - These aliases intentionally mirror the TLSF names so code can be ported more easily.
+*/
+typedef mm_allocator_t* tlsf_t;
+typedef mm_pool_t pool_t;
+
 /* Create/destroy an allocator instance (in-place). */
 mm_allocator_t* mm_create(void* mem, size_t bytes);
 mm_allocator_t* mm_create_with_pool(void* mem, size_t bytes);
