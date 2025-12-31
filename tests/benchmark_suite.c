@@ -37,7 +37,7 @@ void sys_init_stub(void) {}
 void sys_destroy_stub(void) {}
 
 /* Wrappers for Memoman */
-static mm_allocator_t* bench_allocator = NULL;
+static tlsf_t bench_allocator = NULL;
 static void* bench_pool = NULL;
 #define BENCH_POOL_SIZE (1024 * 1024 * 1024) /* 1GB */
 

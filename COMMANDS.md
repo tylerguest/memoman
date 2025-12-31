@@ -58,7 +58,7 @@ Runs the exact same workload against the system allocator (`malloc/free/realloc/
 
 ### Compare against Matthew Conte TLSF (optional)
 
-If you have a local checkout of Matthew Conte’s TLSF under `./matt_conte` (gitignored), you can build an alternate soak binary that adds `MM_SOAK_BACKEND=conte`:
+If you have a local checkout of Matthew Conte’s TLSF under `./examples/matt_conte` (gitignored), you can build an alternate soak binary that adds `MM_SOAK_BACKEND=conte`:
 
 - `make soak_conte_30`
 - `make soak_conte_rt_30`

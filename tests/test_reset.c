@@ -4,7 +4,7 @@
 
 static int test_reset_fails_with_live_allocations(void) {
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
-  mm_allocator_t* alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   void* p = (mm_malloc)(alloc, 1024);
@@ -19,7 +19,7 @@ static int test_reset_succeeds_when_all_free(void) {
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
   uint8_t pool2[64 * 1024] __attribute__((aligned(16)));
 
-  mm_allocator_t* alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
   ASSERT_NOT_NULL(mm_add_pool(alloc, pool2, sizeof(pool2)));
 

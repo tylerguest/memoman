@@ -20,7 +20,11 @@
 
 #if defined(MM_SOAK_HAVE_CONTE_TLSF)
 /* Optional: Matthew Conte TLSF (local checkout in ./matt_conte). */
+#define tlsf_t conte_tlsf_t
+#define pool_t conte_pool_t
 #include "tlsf.h"
+#undef tlsf_t
+#undef pool_t
 #endif
 
 typedef enum {
@@ -128,7 +132,7 @@ static const soak_alloc_api_t g_malloc_api = {
 };
 
 #if defined(MM_SOAK_HAVE_CONTE_TLSF)
-static tlsf_t conte_tlsf;
+static conte_tlsf_t conte_tlsf;
 static void* conte_pool;
 static size_t conte_pool_bytes;
 
@@ -611,7 +615,7 @@ static int soak_pool_add_remove(uint32_t seed) {
   void* raw = malloc(pool_bytes);
   ASSERT_NOT_NULL(raw);
 
-  mm_pool_t pool2 = mm_add_pool(sys_allocator, raw, pool_bytes);
+  pool_t pool2 = mm_add_pool(sys_allocator, raw, pool_bytes);
   if (!pool2) {
     free(raw);
     ASSERT(api->validate_fn());

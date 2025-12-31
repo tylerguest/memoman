@@ -71,12 +71,13 @@ static int test_corrupt_free_list() {
   int fl, sl;
   mm_get_mapping_indices(64, &fl, &sl);
 
-  sys_allocator->sl_bitmap[fl] &= ~(1U << sl);
+  struct mm_allocator_t* ctrl = (struct mm_allocator_t*)sys_allocator;
+  ctrl->sl_bitmap[fl] &= ~(1U << sl);
   
   int result = mm_validate();
 
   /* Restore bit */
-  sys_allocator->sl_bitmap[fl] |= (1u << sl);
+  ctrl->sl_bitmap[fl] |= (1u << sl);
 
   ASSERT(result == 0);
 

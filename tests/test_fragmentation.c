@@ -14,6 +14,7 @@
  */
 static double calculate_fragmentation(void) {
   if (!sys_allocator) return 0.0;
+  struct mm_allocator_t* ctrl = (struct mm_allocator_t*)sys_allocator;
 
   size_t total_free = 0;
   size_t largest_block = 0;
@@ -21,10 +22,10 @@ static double calculate_fragmentation(void) {
 
   /* Iterate through all free lists */
   for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
-    if (!((sys_allocator->fl_bitmap & (1U << fl)))) continue;
+    if (!((ctrl->fl_bitmap & (1U << fl)))) continue;
 
     for (int sl = 0; sl < TLSF_SLI_COUNT; sl++) {
-      tlsf_block_t* block = sys_allocator->blocks[fl][sl];
+      tlsf_block_t* block = ctrl->blocks[fl][sl];
 
       while (block != NULL) {
         size_t block_size = block->size & TLSF_SIZE_MASK;
@@ -49,12 +50,13 @@ static double calculate_fragmentation(void) {
 /* Helper: count number of free blocks */
 static int count_free_blocks(void) {
   if (!sys_allocator) return 0;
+  struct mm_allocator_t* ctrl = (struct mm_allocator_t*)sys_allocator;
 
   int count = 0;
   for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
-    if (!((sys_allocator->fl_bitmap & (1U << fl)))) continue;
+    if (!((ctrl->fl_bitmap & (1U << fl)))) continue;
     for (int sl = 0; sl < TLSF_SLI_COUNT; sl++) {
-      tlsf_block_t* block = sys_allocator->blocks[fl][sl];
+      tlsf_block_t* block = ctrl->blocks[fl][sl];
       while (block != NULL) {
         count++;
         block = block->next_free;

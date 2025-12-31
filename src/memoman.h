@@ -20,38 +20,26 @@
 extern "C" {
 #endif
 
-/* mm_allocator_t: a memoman structure. Can contain 1..N pools. */
-/* mm_pool_t: a block of memory that memoman can manage. */
-typedef struct mm_allocator_t mm_allocator_t;
-typedef void* mm_pool_t;
-
-/*
-** TLSF-style handle type aliases.
-**
-** Notes:
-** - Conte’s `tlsf_t` is a `void*` handle; memoman uses an opaque struct pointer for stronger type checking.
-** - These aliases intentionally mirror the TLSF names so code can be ported more easily.
-*/
-typedef mm_allocator_t* tlsf_t;
-typedef mm_pool_t pool_t;
+/* tlsf_t: a TLSF structure. Can contain 1 to N pools. */
+/* pool_t: a block of memory that TLSF can manage. */
+typedef void* tlsf_t;
+typedef void* pool_t;
 
 /* Create/destroy an allocator instance (in-place). */
-mm_allocator_t* mm_create(void* mem, size_t bytes);
-mm_allocator_t* mm_create_with_pool(void* mem, size_t bytes);
-void mm_destroy(mm_allocator_t* alloc);
-
-/* Get the "primary" pool handle. */
-mm_pool_t mm_get_pool(mm_allocator_t* alloc);
+tlsf_t mm_create(void* mem, size_t bytes);
+tlsf_t mm_create_with_pool(void* mem, size_t bytes);
+void mm_destroy(tlsf_t alloc);
+pool_t mm_get_pool(tlsf_t alloc);
 
 /* Add/remove memory pools. */
-mm_pool_t mm_add_pool(mm_allocator_t* alloc, void* mem, size_t bytes);
-void mm_remove_pool(mm_allocator_t* alloc, mm_pool_t pool);
+pool_t mm_add_pool(tlsf_t alloc, void* mem, size_t bytes);
+void mm_remove_pool(tlsf_t alloc, pool_t pool);
 
 /* malloc/memalign/realloc/free replacements. */
-void* mm_malloc(mm_allocator_t* alloc, size_t size);
-void* mm_memalign(mm_allocator_t* alloc, size_t alignment, size_t size);
-void* mm_realloc(mm_allocator_t* alloc, void* ptr, size_t size);
-void  mm_free(mm_allocator_t* alloc, void* ptr);
+void* mm_malloc(tlsf_t alloc, size_t size);
+void* mm_memalign(tlsf_t alloc, size_t alignment, size_t size);
+void* mm_realloc(tlsf_t alloc, void* ptr, size_t size);
+void  mm_free(tlsf_t alloc, void* ptr);
 
 /* Returns internal block size, not original request size. */
 size_t mm_block_size(void* ptr);
@@ -66,19 +54,17 @@ size_t mm_alloc_overhead(void);
 
 /* Debugging. */
 typedef void (*mm_walker)(void* ptr, size_t size, int used, void* user);
-void mm_walk_pool(mm_pool_t pool, mm_walker walker, void* user);
-
-/* Returns nonzero if internal consistency checks pass. */
-int mm_validate(mm_allocator_t* alloc);
-int mm_validate_pool(mm_allocator_t* alloc, mm_pool_t pool);
+void mm_walk_pool(pool_t pool, mm_walker walker, void* user);
+int mm_validate(tlsf_t alloc);
+int mm_validate_pool(tlsf_t alloc, pool_t pool);
 
 /* Memoman extensions (TLSF does not define these). */
-mm_allocator_t* mm_init_in_place(void* mem, size_t bytes);
-mm_pool_t mm_get_pool_for_ptr(mm_allocator_t* alloc, const void* ptr);
-int mm_reset(mm_allocator_t* alloc);
+tlsf_t mm_init_in_place(void* mem, size_t bytes);
+pool_t mm_get_pool_for_ptr(tlsf_t alloc, const void* ptr);
+int mm_reset(tlsf_t alloc);
 
 #if defined(__cplusplus)
-}
+};
 #endif
 
 #endif

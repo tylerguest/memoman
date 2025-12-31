@@ -9,14 +9,14 @@ Repo policy:
 - Hot-path operations must remain **O(1)** (bounded by FL/SL parameters, never proportional to heap size).
 - Validation/walk tooling may be O(n) in block count (debug and tooling paths only).
 - We do not vendor third-party TLSF sources into this repo; parity testing against other TLSF implementations is
-  supported as a dev-only harness that builds only when a local implementation is present (e.g. `./matt_conte`, gitignored).
+  supported as a dev-only harness that builds only when a local implementation is present (e.g. `./examples/matt_conte`, gitignored).
 
 ## Current Status (Already Implemented)
 
 - **Core invariants**: TLSF 3.1 block layout + prev-phys linkage; derived minimum block size; mapping/search; pool tracking/handles.
 - **TLSF-style tooling**: pool handles, `mm_walk_pool`, `mm_validate`/`mm_validate_pool`, pool add/remove safety checks.
 - **Testing**: unit tests + deterministic stress tests; long-running soak/RT-ish soak with live stats and max latency tracking.
-- **Performance compare**: one-command comparison runs are available (memoman vs malloc, and optionally memoman vs Conte TLSF if `./matt_conte` exists).
+- **Performance compare**: one-command comparison runs are available (memoman vs malloc, and optionally memoman vs Conte TLSF if `./examples/matt_conte` exists).
 
 ## What “TLSF 3.1-Equivalent” Means
 
@@ -38,7 +38,7 @@ tooling, nicer integration), never at the expense of correctness or O(1) guarant
   - **Requirements**:
     - fixed seed, deterministic operation generator
     - “shrinkable” failures (log the minimal reproducer)
-    - build only if an external TLSF implementation is present locally (`./matt_conte`, gitignored)
+    - build only if an external TLSF implementation is present locally (`./examples/matt_conte`, gitignored)
     - compare correctness properties (success/failure, alignment, realloc data preservation, etc.), not throughput
 
 - [ ] **Strict parity mode passes**
@@ -54,7 +54,7 @@ Get to a point where someone can swap your allocator in where they’d use TLSF 
 - `tlsf_create_with_pool` → `mm_create_with_pool` (in-place init in a single backing buffer)
 - `tlsf_destroy` → `mm_destroy` (likely a no-op; caller owns memory)
 - `tlsf_get_pool` → `mm_get_pool` (returns a “primary” pool handle)
-- `tlsf_add_pool` → `mm_add_pool` (should return a `mm_pool_t` handle like TLSF)
+- `tlsf_add_pool` → `mm_add_pool` (returns a `pool_t` handle like TLSF)
 - `tlsf_remove_pool` → `mm_remove_pool`
 - `tlsf_malloc` / `tlsf_free` → `mm_malloc` / `mm_free`
 - `tlsf_realloc` → `mm_realloc`

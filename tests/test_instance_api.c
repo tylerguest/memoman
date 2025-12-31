@@ -6,7 +6,7 @@
 static int test_malloc_inst_basic() {
   /* Create a pool on the stack */
   uint8_t buffer[16384] __attribute__((aligned(16)));
-  mm_allocator_t* alloc = mm_create(buffer, sizeof(buffer));
+  tlsf_t alloc = mm_create(buffer, sizeof(buffer));
   ASSERT_NOT_NULL(alloc);
 
   /* Allocate some memory */
@@ -24,7 +24,7 @@ static int test_malloc_inst_basic() {
 
 static int test_realloc_inst_growth() {
   uint8_t buffer[16384] __attribute__((aligned(16)));
-  mm_allocator_t* alloc = mm_create(buffer, sizeof(buffer));
+  tlsf_t alloc = mm_create(buffer, sizeof(buffer));
   
   void* p = (mm_malloc)(alloc, 64);
   ASSERT_NOT_NULL(p);
@@ -51,7 +51,7 @@ static int test_realloc_inst_growth() {
 static int test_realloc_inst_oom() {
   /* Create a small pool (16KB) - enough for struct (~8KB) + heap */
   uint8_t buffer[16384] __attribute__((aligned(16)));
-  mm_allocator_t* alloc = mm_create(buffer, sizeof(buffer));
+  tlsf_t alloc = mm_create(buffer, sizeof(buffer));
   ASSERT_NOT_NULL(alloc);
   
   /* Use up some space */
@@ -71,7 +71,7 @@ static int test_realloc_inst_oom() {
 
 static int test_realloc_inst_inplace() {
   uint8_t buffer[16384] __attribute__((aligned(16)));
-  mm_allocator_t* alloc = mm_create(buffer, sizeof(buffer));
+  tlsf_t alloc = mm_create(buffer, sizeof(buffer));
 
   void* p1 = (mm_malloc)(alloc, 64);
   void* p2 = (mm_malloc)(alloc, 64);

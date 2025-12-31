@@ -9,7 +9,7 @@ BIN_DIR = tests/bin
 TEST_SRCS = $(filter-out $(TEST_DIR)/test_soak.c,$(wildcard $(TEST_DIR)/*.c))
 TEST_BINS = $(patsubst $(TEST_DIR)/%.c, $(BIN_DIR)/%, $(TEST_SRCS))
 SOAK_BIN = $(BIN_DIR)/test_soak
-CONTE_TLSF_SRC = matt_conte/tlsf.c
+CONTE_TLSF_SRC = examples/matt_conte/tlsf.c
 SOAK_CONTE_BIN = $(BIN_DIR)/test_soak_conte
 
 .PHONY: all clean debug benchmark run
@@ -40,12 +40,12 @@ $(SOAK_BIN): $(TEST_DIR)/test_soak.c $(SRC)
 ifeq ($(wildcard $(CONTE_TLSF_SRC)),)
 $(SOAK_CONTE_BIN):
 	@echo "Conte TLSF not found: $(CONTE_TLSF_SRC) (folder is gitignored)."
-	@echo "Add a local checkout under ./matt_conte to build this target."
+	@echo "Add a local checkout under ./examples/matt_conte to build this target."
 	@exit 1
 else
 $(SOAK_CONTE_BIN): $(TEST_DIR)/test_soak.c $(SRC) $(CONTE_TLSF_SRC)
 	@mkdir -p $(BIN_DIR)
-	$(CC) $(CFLAGS) -DMM_SOAK_HAVE_CONTE_TLSF=1 -Imatt_conte -o $@ $(SRC) $(CONTE_TLSF_SRC) $<
+	$(CC) $(CFLAGS) -DMM_SOAK_HAVE_CONTE_TLSF=1 -Iexamples/matt_conte -o $@ $(SRC) $(CONTE_TLSF_SRC) $<
 endif
 
 clean:

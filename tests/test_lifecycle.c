@@ -5,11 +5,11 @@
 
 static int test_stack_pool() {
   /* 1. Create a pool on the stack (Explicit Ownership) 
-   * Note: sizeof(mm_allocator_t) is ~8KB, so we need a buffer larger than that.
+   * Note: mm_size() is ~8KB, so we need a buffer larger than that.
    */
   uint8_t buffer[16384] __attribute__((aligned(16)));
   
-  mm_allocator_t* alloc = mm_create(buffer, sizeof(buffer));
+  tlsf_t alloc = mm_create(buffer, sizeof(buffer));
   ASSERT_NOT_NULL(alloc);
   
   /* 2. Allocate from it */
@@ -35,8 +35,8 @@ static int test_multiple_pools() {
   void* mem1 = malloc(pool_size);
   void* mem2 = malloc(pool_size);
   
-  mm_allocator_t* a1 = mm_create(mem1, pool_size);
-  mm_allocator_t* a2 = mm_create(mem2, pool_size);
+  tlsf_t a1 = mm_create(mem1, pool_size);
+  tlsf_t a2 = mm_create(mem2, pool_size);
   
   ASSERT_NOT_NULL(a1);
   ASSERT_NOT_NULL(a2);

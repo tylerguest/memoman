@@ -8,6 +8,9 @@
 
 #include "memoman.h"
 
+/* Internal control structure type. The public API uses opaque `tlsf_t` handles. */
+typedef struct mm_allocator_t mm_allocator_t;
+
 /*
 ** memoman
 **
@@ -281,7 +284,7 @@ static inline tlsf_block_t* user_to_block(void* ptr) { return (tlsf_block_t*)((c
 /*
 ** Pool handle helpers.
 */
-static mm_pool_desc_t* pool_desc_from_handle(mm_allocator_t* ctrl, mm_pool_t pool) {
+static mm_pool_desc_t* pool_desc_from_handle(mm_allocator_t* ctrl, pool_t pool) {
   if (!ctrl || !pool) return NULL;
   uintptr_t base = (uintptr_t)&ctrl->pools[0];
   uintptr_t end = (uintptr_t)(&ctrl->pools[MM_MAX_POOLS]);
@@ -422,7 +425,7 @@ static inline mm_ptr_check_t mm_ptr_to_block_checked(
 
   if (((uintptr_t)ptr % ALIGNMENT) != 0) return MM_PTR_INVALID;
 
-  mm_pool_t pool = mm_get_pool_for_ptr(ctrl, ptr);
+  pool_t pool = mm_get_pool_for_ptr((tlsf_t)ctrl, ptr);
   if (!pool) return MM_PTR_INVALID;
 
   mm_pool_desc_t* pool_desc = (mm_pool_desc_t*)pool;
@@ -522,7 +525,8 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
 ** Validation is allowed to be O(n) in block count; it is not used on the hot path in release builds.
 */
 
-int mm_validate(mm_allocator_t* ctrl) {
+int mm_validate(tlsf_t tlsf) {
+  mm_allocator_t* ctrl = (mm_allocator_t*)tlsf;
   if (!ctrl) return 0;
 
   #define CHECK(cond, msg) do { if (!(cond)) { return 0; } } while(0)
@@ -532,7 +536,7 @@ int mm_validate(mm_allocator_t* ctrl) {
   for (size_t i = 0; i < MM_MAX_POOLS; i++) {
     if (!ctrl->pools[i].active) continue;
     pools_bytes += ctrl->pools[i].bytes;
-    CHECK(mm_validate_pool(ctrl, (mm_pool_t)&ctrl->pools[i]), "Pool validation failed");
+    CHECK(mm_validate_pool(tlsf, (pool_t)&ctrl->pools[i]), "Pool validation failed");
   }
   CHECK(pools_bytes == ctrl->total_pool_size, "total_pool_size does not match sum of pools");
 
@@ -662,7 +666,8 @@ int mm_validate(mm_allocator_t* ctrl) {
   return 1;
 }
 
-int mm_validate_pool(mm_allocator_t* alloc, mm_pool_t pool) {
+int mm_validate_pool(tlsf_t tlsf, pool_t pool) {
+  mm_allocator_t* alloc = (mm_allocator_t*)tlsf;
   if (!alloc || !pool) return 0;
 
   mm_pool_desc_t* desc = pool_desc_from_handle(alloc, pool);
@@ -754,7 +759,7 @@ static void mm_check_integrity(mm_allocator_t* ctrl) {
 /*
 ** Public API.
 */
-mm_allocator_t* mm_create(void* mem, size_t bytes) {
+tlsf_t mm_create(void* mem, size_t bytes) {
   /* Overhead: Allocator + Alignment Padding + Min Block + Epilogue */
   size_t overhead = sizeof(mm_allocator_t) + ALIGNMENT + BLOCK_HEADER_OVERHEAD + BLOCK_HEADER_OVERHEAD;
   if (bytes < overhead + TLSF_MIN_BLOCK_SIZE) return NULL;
@@ -769,20 +774,20 @@ mm_allocator_t* mm_create(void* mem, size_t bytes) {
   void* pool_mem = (char*)mem + sizeof(mm_allocator_t);
   size_t pool_bytes = bytes - sizeof(mm_allocator_t);
   
-  if (!mm_add_pool(allocator, pool_mem, pool_bytes)) return NULL;
+  if (!mm_add_pool((tlsf_t)allocator, pool_mem, pool_bytes)) return NULL;
 
-  return allocator;
+  return (tlsf_t)allocator;
 }
 
-mm_allocator_t* mm_create_with_pool(void* mem, size_t bytes) {
+tlsf_t mm_create_with_pool(void* mem, size_t bytes) {
   return mm_create(mem, bytes);
 }
 
-mm_allocator_t* mm_init_in_place(void* mem, size_t bytes) {
+tlsf_t mm_init_in_place(void* mem, size_t bytes) {
   return mm_create(mem, bytes);
 }
 
-void mm_destroy(mm_allocator_t* alloc) {
+void mm_destroy(tlsf_t alloc) {
   /* No-op by design: caller owns all memory and core never calls OS APIs. */
   (void)alloc;
 }
@@ -790,11 +795,12 @@ void mm_destroy(mm_allocator_t* alloc) {
 /*
 ** Extensions.
 */
-int mm_reset(mm_allocator_t* allocator) {
+int mm_reset(tlsf_t tlsf) {
+  mm_allocator_t* allocator = (mm_allocator_t*)tlsf;
   if (!allocator) return 0;
 
   /* Refuse to reset if the heap is already inconsistent. */
-  if (!mm_validate(allocator)) return 0;
+  if (!mm_validate(tlsf)) return 0;
 
   /* Refuse to reset if any live allocation exists in any pool. */
   for (size_t i = 0; i < MM_MAX_POOLS; i++) {
@@ -830,18 +836,20 @@ int mm_reset(mm_allocator_t* allocator) {
     desc->live_allocations = 0;
   }
 
-  return mm_validate(allocator);
+  return mm_validate(tlsf);
 }
 
-mm_pool_t mm_get_pool(mm_allocator_t* allocator) {
+pool_t mm_get_pool(tlsf_t tlsf) {
+  mm_allocator_t* allocator = (mm_allocator_t*)tlsf;
   if (!allocator) return NULL;
   for (size_t i = 0; i < MM_MAX_POOLS; i++) {
-    if (allocator->pools[i].active) return (mm_pool_t)&allocator->pools[i];
+    if (allocator->pools[i].active) return (pool_t)&allocator->pools[i];
   }
   return NULL;
 }
 
-mm_pool_t mm_get_pool_for_ptr(mm_allocator_t* allocator, const void* ptr) {
+pool_t mm_get_pool_for_ptr(tlsf_t tlsf, const void* ptr) {
+  mm_allocator_t* allocator = (mm_allocator_t*)tlsf;
   if (!allocator || !ptr) return NULL;
 
   uintptr_t user_addr = (uintptr_t)ptr;
@@ -853,13 +861,14 @@ mm_pool_t mm_get_pool_for_ptr(mm_allocator_t* allocator, const void* ptr) {
   for (size_t i = 0; i < MM_MAX_POOLS; i++) {
     mm_pool_desc_t* p = &allocator->pools[i];
     if (!p->active) continue;
-    if (block_addr >= (uintptr_t)p->start && block_addr < (uintptr_t)p->end) return (mm_pool_t)p;
+    if (block_addr >= (uintptr_t)p->start && block_addr < (uintptr_t)p->end) return (pool_t)p;
   }
 
   return NULL;
 }
 
-mm_pool_t mm_add_pool(mm_allocator_t* allocator, void* mem, size_t bytes) {
+pool_t mm_add_pool(tlsf_t tlsf, void* mem, size_t bytes) {
+  mm_allocator_t* allocator = (mm_allocator_t*)tlsf;
   if (!allocator || !mem) return NULL;
 
   size_t overhead = ALIGNMENT + BLOCK_HEADER_OVERHEAD + BLOCK_HEADER_OVERHEAD;
@@ -913,10 +922,11 @@ mm_pool_t mm_add_pool(mm_allocator_t* allocator, void* mem, size_t bytes) {
   insert_free_block(allocator, block);
   allocator->total_pool_size += aligned_bytes;
   
-  return (mm_pool_t)desc;
+  return (pool_t)desc;
 }
 
-void mm_remove_pool(mm_allocator_t* allocator, mm_pool_t pool) {
+void mm_remove_pool(tlsf_t tlsf, pool_t pool) {
+  mm_allocator_t* allocator = (mm_allocator_t*)tlsf;
   if (!allocator || !pool) return;
 
   mm_pool_desc_t* desc = pool_desc_from_handle(allocator, pool);
@@ -962,7 +972,8 @@ void mm_remove_pool(mm_allocator_t* allocator, mm_pool_t pool) {
   desc->live_allocations = 0;
 }
 
-void* mm_malloc(mm_allocator_t* ctrl, size_t size) {
+void* mm_malloc(tlsf_t tlsf, size_t size) {
+  mm_allocator_t* ctrl = (mm_allocator_t*)tlsf;
   if (!ctrl || size == 0) return NULL;
   mm_check_integrity(ctrl);
 
@@ -998,7 +1009,8 @@ void* mm_malloc(mm_allocator_t* ctrl, size_t size) {
   return block_to_user(block);
 }
 
-void mm_free(mm_allocator_t* ctrl, void* ptr) {
+void mm_free(tlsf_t tlsf, void* ptr) {
+  mm_allocator_t* ctrl = (mm_allocator_t*)tlsf;
   if (!ptr || !ctrl) return;
   mm_check_integrity(ctrl);
 
@@ -1095,9 +1107,10 @@ static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
   return -1;
 }
 
-void* mm_realloc(mm_allocator_t* ctrl, void* ptr, size_t size) {
-  if (!ptr) return mm_malloc(ctrl, size);
-  if (size == 0) { mm_free(ctrl, ptr); return NULL; }
+void* mm_realloc(tlsf_t tlsf, void* ptr, size_t size) {
+  mm_allocator_t* ctrl = (mm_allocator_t*)tlsf;
+  if (!ptr) return mm_malloc(tlsf, size);
+  if (size == 0) { mm_free(tlsf, ptr); return NULL; }
 
 #ifdef MM_DEBUG
   if (!ctrl) return NULL;
@@ -1128,22 +1141,23 @@ void* mm_realloc(mm_allocator_t* ctrl, void* ptr, size_t size) {
   }
 
   /* Status 1: Needs move */
-  void* new_ptr = mm_malloc(ctrl, size);
+  void* new_ptr = mm_malloc(tlsf, size);
   if (new_ptr) {
     size_t old_usable = block_size(block);
     memcpy(new_ptr, ptr, (old_usable < size) ? old_usable : size);
-    mm_free(ctrl, ptr);
+    mm_free(tlsf, ptr);
   }
   return new_ptr;
 }
 
-void* mm_memalign(mm_allocator_t* ctrl, size_t alignment, size_t size) {
+void* mm_memalign(tlsf_t tlsf, size_t alignment, size_t size) {
+  mm_allocator_t* ctrl = (mm_allocator_t*)tlsf;
   if (!ctrl) return NULL;
   if (alignment == 0 || (alignment & (alignment - 1)) != 0) return NULL; /* must be power of two */
   if (size == 0) return NULL;
 
   /* If alignment is <= default alignment, regular malloc suffices */
-  if (alignment <= ALIGNMENT) return mm_malloc(ctrl, size);
+  if (alignment <= ALIGNMENT) return mm_malloc(tlsf, size);
 
   mm_check_integrity(ctrl);
 
@@ -1266,7 +1280,7 @@ size_t mm_alloc_overhead(void) {
   return BLOCK_START_OFFSET;
 }
 
-void mm_walk_pool(mm_pool_t pool, mm_walker walker, void* user) {
+void mm_walk_pool(pool_t pool, mm_walker walker, void* user) {
   if (!pool || !walker) return;
   mm_pool_desc_t* desc = (mm_pool_desc_t*)pool;
   if (!desc->active) return;

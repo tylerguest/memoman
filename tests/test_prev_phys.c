@@ -10,19 +10,19 @@ static inline tlsf_block_t* block_prev_link_local(const tlsf_block_t* block) {
   return *((tlsf_block_t**)((char*)block - sizeof(void*)));
 }
 
-static mm_allocator_t* make_allocator(uint8_t* backing, size_t bytes) {
-  mm_allocator_t* alloc = mm_create(backing, bytes);
+static tlsf_t make_allocator(uint8_t* backing, size_t bytes) {
+  tlsf_t alloc = mm_create(backing, bytes);
   ASSERT_NOT_NULL(alloc);
   return alloc;
 }
 
 static int test_add_pool_initial_links(void) {
   uint8_t pool[16384] __attribute__((aligned(ALIGNMENT)));
-  mm_allocator_t* alloc = make_allocator(pool, sizeof(pool));
+  tlsf_t alloc = make_allocator(pool, sizeof(pool));
   (void)alloc;
 
-  char* pool_mem = (char*)pool + sizeof(mm_allocator_t);
-  size_t pool_bytes = sizeof(pool) - sizeof(mm_allocator_t);
+  char* pool_mem = (char*)pool + mm_size();
+  size_t pool_bytes = sizeof(pool) - mm_size();
 
   uintptr_t start_addr = (uintptr_t)pool_mem;
   uintptr_t aligned_addr = (start_addr + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
@@ -45,7 +45,7 @@ static int test_add_pool_initial_links(void) {
 
 static int test_free_sets_next_prev_link(void) {
   uint8_t pool[16384] __attribute__((aligned(ALIGNMENT)));
-  mm_allocator_t* alloc = make_allocator(pool, sizeof(pool));
+  tlsf_t alloc = make_allocator(pool, sizeof(pool));
 
   void* p1 = (mm_malloc)(alloc, 64);
   void* p2 = (mm_malloc)(alloc, 64);
@@ -66,7 +66,7 @@ static int test_free_sets_next_prev_link(void) {
 
 static int test_split_updates_next_links(void) {
   uint8_t pool[16384] __attribute__((aligned(ALIGNMENT)));
-  mm_allocator_t* alloc = make_allocator(pool, sizeof(pool));
+  tlsf_t alloc = make_allocator(pool, sizeof(pool));
 
   void* big = (mm_malloc)(alloc, 256);
   ASSERT_NOT_NULL(big);
@@ -92,7 +92,7 @@ static int test_split_updates_next_links(void) {
 
 static int test_realloc_grow_clears_next_prev_free(void) {
   uint8_t pool[16384] __attribute__((aligned(ALIGNMENT)));
-  mm_allocator_t* alloc = make_allocator(pool, sizeof(pool));
+  tlsf_t alloc = make_allocator(pool, sizeof(pool));
 
   void* p1 = (mm_malloc)(alloc, 128);
   void* p2 = (mm_malloc)(alloc, 256);
@@ -123,7 +123,7 @@ static int test_realloc_grow_clears_next_prev_free(void) {
 
 static int test_realloc_shrink_sets_next_prev_link(void) {
   uint8_t pool[16384] __attribute__((aligned(ALIGNMENT)));
-  mm_allocator_t* alloc = make_allocator(pool, sizeof(pool));
+  tlsf_t alloc = make_allocator(pool, sizeof(pool));
 
   void* p = (mm_malloc)(alloc, 512);
   ASSERT_NOT_NULL(p);

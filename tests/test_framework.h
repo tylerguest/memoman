@@ -19,7 +19,7 @@
 
 /* --- Test Instance Helper --- */
 /* Simulates the old global API for tests so we don't have to rewrite them all */
-static mm_allocator_t* _test_allocator = NULL;
+static tlsf_t _test_allocator = NULL;
 static void* _test_pool = NULL;
 #define TEST_POOL_SIZE (1024 * 1024 * 32) /* 32MB for tests */
 

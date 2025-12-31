@@ -3,10 +3,10 @@
 
 #include <stdint.h>
 
-static mm_allocator_t* make_two_pool_allocator(uint8_t* pool1, size_t bytes1, uint8_t* pool2, size_t bytes2, mm_pool_t* out_pool2) {
-  mm_allocator_t* alloc = mm_create(pool1, bytes1);
+static tlsf_t make_two_pool_allocator(uint8_t* pool1, size_t bytes1, uint8_t* pool2, size_t bytes2, pool_t* out_pool2) {
+  tlsf_t alloc = mm_create(pool1, bytes1);
   ASSERT_NOT_NULL(alloc);
-  mm_pool_t p2 = mm_add_pool(alloc, pool2, bytes2);
+  pool_t p2 = mm_add_pool(alloc, pool2, bytes2);
   ASSERT_NOT_NULL(p2);
   if (out_pool2) *out_pool2 = p2;
   ASSERT((mm_validate)(alloc));
@@ -15,20 +15,22 @@ static mm_allocator_t* make_two_pool_allocator(uint8_t* pool1, size_t bytes1, ui
 
 static int test_detects_fl_sl_bitmap_mismatch(void) {
   uint8_t pool1[64 * 1024] __attribute__((aligned(16)));
-  mm_allocator_t* alloc = mm_create(pool1, sizeof(pool1));
+  tlsf_t alloc = mm_create(pool1, sizeof(pool1));
   ASSERT_NOT_NULL(alloc);
+  struct mm_allocator_t* ctrl = (struct mm_allocator_t*)alloc;
 
   /* Force an inconsistent bitmap state. */
-  alloc->sl_bitmap[0] |= 1u;
-  alloc->fl_bitmap &= ~(1u << 0);
+  ctrl->sl_bitmap[0] |= 1u;
+  ctrl->fl_bitmap &= ~(1u << 0);
   ASSERT(!(mm_validate)(alloc));
   return 1;
 }
 
 static int test_detects_free_block_missing_from_list(void) {
   uint8_t pool1[64 * 1024] __attribute__((aligned(16)));
-  mm_allocator_t* alloc = mm_create(pool1, sizeof(pool1));
+  tlsf_t alloc = mm_create(pool1, sizeof(pool1));
   ASSERT_NOT_NULL(alloc);
+  struct mm_allocator_t* ctrl = (struct mm_allocator_t*)alloc;
 
   void* p = (mm_malloc)(alloc, 1024);
   ASSERT_NOT_NULL(p);
@@ -38,13 +40,13 @@ static int test_detects_free_block_missing_from_list(void) {
   tlsf_block_t* b = (tlsf_block_t*)((char*)p - BLOCK_START_OFFSET);
   int fl = 0, sl = 0;
   mm_get_mapping_indices(b->size & TLSF_SIZE_MASK, &fl, &sl);
-  ASSERT(alloc->blocks[fl][sl] != NULL);
+  ASSERT(ctrl->blocks[fl][sl] != NULL);
 
   /* Corrupt: drop the freed block from its bucket list (but keep it physically free). */
-  tlsf_block_t* head = alloc->blocks[fl][sl];
+  tlsf_block_t* head = ctrl->blocks[fl][sl];
   if (head == b) {
-    alloc->blocks[fl][sl] = b->next_free;
-    if (alloc->blocks[fl][sl]) alloc->blocks[fl][sl]->prev_free = NULL;
+    ctrl->blocks[fl][sl] = b->next_free;
+    if (ctrl->blocks[fl][sl]) ctrl->blocks[fl][sl]->prev_free = NULL;
   } else {
     /* Find and unlink b from the list. */
     tlsf_block_t* prev = head;
@@ -63,7 +65,7 @@ static int test_detects_free_block_missing_from_list(void) {
 
 static int test_detects_prev_free_inconsistency(void) {
   uint8_t pool1[64 * 1024] __attribute__((aligned(16)));
-  mm_allocator_t* alloc = mm_create(pool1, sizeof(pool1));
+  tlsf_t alloc = mm_create(pool1, sizeof(pool1));
   ASSERT_NOT_NULL(alloc);
 
   void* a = (mm_malloc)(alloc, 256);
@@ -83,8 +85,8 @@ static int test_detects_prev_free_inconsistency(void) {
 static int test_detects_epilogue_corruption(void) {
   uint8_t pool1[64 * 1024] __attribute__((aligned(16)));
   uint8_t pool2[64 * 1024] __attribute__((aligned(16)));
-  mm_pool_t p2 = NULL;
-  mm_allocator_t* alloc = make_two_pool_allocator(pool1, sizeof(pool1), pool2, sizeof(pool2), &p2);
+  pool_t p2 = NULL;
+  tlsf_t alloc = make_two_pool_allocator(pool1, sizeof(pool1), pool2, sizeof(pool2), &p2);
 
   mm_pool_desc_t* desc = (mm_pool_desc_t*)p2;
   tlsf_block_t* epilogue = (tlsf_block_t*)(desc->end - BLOCK_HEADER_OVERHEAD);
@@ -104,4 +106,3 @@ int main(void) {
   TEST_SUITE_END();
   TEST_MAIN_END();
 }
-

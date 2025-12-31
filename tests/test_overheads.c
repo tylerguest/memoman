@@ -13,13 +13,13 @@ static int test_sizing_constants(void) {
   ASSERT(mm_block_size_max() < ((size_t)1 << FL_INDEX_MAX));
   ASSERT(mm_block_size_max() >= mm_block_size_min());
 
-  ASSERT_GE(mm_size(), sizeof(mm_allocator_t));
+  ASSERT_EQ(mm_size(), sizeof(struct mm_allocator_t));
   return 1;
 }
 
 static int test_pool_overhead_minimum(void) {
   uint8_t buf[256] __attribute__((aligned(16)));
-  mm_allocator_t* alloc = mm_create(buf, sizeof(buf));
+  tlsf_t alloc = mm_create(buf, sizeof(buf));
   ASSERT_NULL(alloc);
 
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
@@ -41,7 +41,7 @@ static int test_pool_overhead_minimum(void) {
 
 static int test_block_size_max_behavior(void) {
   uint8_t backing[256 * 1024] __attribute__((aligned(16)));
-  mm_allocator_t* alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   /*
