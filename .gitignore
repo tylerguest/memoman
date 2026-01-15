@@ -36,9 +36,6 @@ lcov.info
 # Project-specific
 tests/bin/
 libmemoman.a
-examples/TLSF/matt_conte/
-matt_conte/
-examples/matt_conte/
 
 # Logs
 *.log

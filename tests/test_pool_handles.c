@@ -10,7 +10,7 @@ static int in_range(const void* p, const void* base, size_t bytes) {
 
 static int test_get_pool_nonnull(void) {
   uint8_t pool[64 * 1024] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(pool, sizeof(pool));
+  tlsf_t alloc = mm_create_with_pool(pool, sizeof(pool));
   ASSERT_NOT_NULL(alloc);
   ASSERT_NOT_NULL(mm_get_pool(alloc));
   return 1;
@@ -19,7 +19,7 @@ static int test_get_pool_nonnull(void) {
 static int test_add_pool_returns_handle(void) {
   uint8_t pool1[64 * 1024] __attribute__((aligned(16)));
   uint8_t pool2[64 * 1024] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(pool1, sizeof(pool1));
+  tlsf_t alloc = mm_create_with_pool(pool1, sizeof(pool1));
   ASSERT_NOT_NULL(alloc);
 
   pool_t p0 = mm_get_pool(alloc);
@@ -37,7 +37,7 @@ static int test_remove_pool_empty_disables_allocation(void) {
   uint8_t backing[32 * 1024] __attribute__((aligned(16)));
   uint8_t pool2[128 * 1024] __attribute__((aligned(16)));
 
-  tlsf_t alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   pool_t p2 = mm_add_pool(alloc, pool2, sizeof(pool2));
@@ -63,7 +63,7 @@ static int test_remove_pool_with_live_alloc_is_noop(void) {
   uint8_t backing[32 * 1024] __attribute__((aligned(16)));
   uint8_t pool2[128 * 1024] __attribute__((aligned(16)));
 
-  tlsf_t alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   pool_t p2 = mm_add_pool(alloc, pool2, sizeof(pool2));

@@ -7,7 +7,7 @@ static int test_get_pool_for_ptr_basic(void) {
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
   uint8_t pool2[128 * 1024] __attribute__((aligned(16)));
 
-  tlsf_t alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   pool_t p0 = mm_get_pool(alloc);
@@ -38,7 +38,7 @@ static int test_get_pool_for_ptr_basic(void) {
 
 static int test_get_pool_for_ptr_rejects_non_mm_ptrs(void) {
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   uint8_t not_from_mm[64] __attribute__((aligned(16)));

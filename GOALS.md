@@ -14,6 +14,11 @@ Repo policy:
 ## Current Status (Already Implemented)
 
 - **Core invariants**: TLSF 3.1 block layout + prev-phys linkage; derived minimum block size; mapping/search; pool tracking/handles.
+- **TLSF-style public handle/types + signatures**: `src/memoman.h` now mirrors Conte’s handle types (`tlsf_t`/`pool_t` are `void*`) and key API shapes:
+  - `mm_create(void* mem)` is control-only (TLSF-style)
+  - `mm_create_with_pool(void* mem, size_t bytes)` is the one-shot convenience
+  - `mm_malloc(..., size_t bytes)` and `mm_memalign(..., size_t align, size_t bytes)` use Conte-style parameter naming
+  - `mm_validate_pool(pool_t pool)` is pool-only like `tlsf_check_pool(pool_t pool)`
 - **TLSF-style tooling**: pool handles, `mm_walk_pool`, `mm_validate`/`mm_validate_pool`, pool add/remove safety checks.
 - **Testing**: unit tests + deterministic stress tests; long-running soak/RT-ish soak with live stats and max latency tracking.
 - **Performance compare**: one-command comparison runs are available (memoman vs malloc, and optionally memoman vs Conte TLSF if `./examples/matt_conte` exists).
@@ -50,7 +55,7 @@ Get to a point where someone can swap your allocator in where they’d use TLSF 
 
 ### API Equivalence Map (Conte → memoman)
 
-- `tlsf_create` → `mm_create` (TODO: make `mm_create` control-only; currently it also consumes the remaining bytes as the first pool)
+- `tlsf_create` → `mm_create` (control-only; same signature shape)
 - `tlsf_create_with_pool` → `mm_create_with_pool` (in-place init in a single backing buffer)
 - `tlsf_destroy` → `mm_destroy` (likely a no-op; caller owns memory)
 - `tlsf_get_pool` → `mm_get_pool` (returns a “primary” pool handle)
@@ -65,7 +70,15 @@ Get to a point where someone can swap your allocator in where they’d use TLSF 
 - `tlsf_size`, `tlsf_align_size`, `tlsf_block_size_min/max`, `tlsf_pool_overhead`, `tlsf_alloc_overhead`
   → `mm_size`, `mm_align_size`, `mm_block_size_min/max`, `mm_pool_overhead`, `mm_alloc_overhead`
 
-- [ ] **TLSF-style create semantics**
+- [x] **TLSF header parity (types + signature shapes)**
+  - **Goal**: Make the public `memoman.h` API surface feel “TLSF-shaped” for easy porting.
+  - **Deliverables**:
+    - `tlsf_t`/`pool_t` are `void*`
+    - `mm_create(void* mem)` is control-only
+    - pool-only `mm_validate_pool(pool_t pool)`
+    - align/bytes parameter naming on `mm_malloc`/`mm_memalign`
+
+- [x] **TLSF-style create semantics**
   - **Goal**: Make `mm_create` match TLSF’s `tlsf_create` semantics (control-only).
   - **Deliverables**:
     - `mm_create` initializes control only (no implicit pool consumption)
@@ -77,6 +90,15 @@ Get to a point where someone can swap your allocator in where they’d use TLSF 
   - **Deliverables**:
     - decide and document whether `mm_validate*` returns `0` on success (TLSF-style) or nonzero on success (current style)
     - if keeping current style, consider adding `mm_check` / `mm_check_pool` wrappers with TLSF-style semantics
+
+- [ ] **Pool handle semantics parity**
+  - **Goal**: Decide whether memoman’s `pool_t` should match Conte’s pool-handle model (pool handle is the pool-memory base) or remain a control-structure handle.
+  - **Notes**:
+    - Today, memoman’s `pool_t` is a handle tied to the allocator’s internal pool tracking; this enables O(1) handle validation and safe pool removal checks.
+    - Conte’s `pool_t` is a pool-memory handle; this enables `tlsf_check_pool(pool)` without needing a `tlsf_t`.
+  - **Deliverables**:
+    - choose the model and document it
+    - if changing semantics, update `mm_walk_pool`/`mm_validate_pool` signatures and tests accordingly (hot paths must remain O(1))
 
 ## Phase 2: Correctness & Debuggability (TLSF’s Big Differentiator)
 

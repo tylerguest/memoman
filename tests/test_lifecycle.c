@@ -9,7 +9,7 @@ static int test_stack_pool() {
    */
   uint8_t buffer[16384] __attribute__((aligned(16)));
   
-  tlsf_t alloc = mm_create(buffer, sizeof(buffer));
+  tlsf_t alloc = mm_create_with_pool(buffer, sizeof(buffer));
   ASSERT_NOT_NULL(alloc);
   
   /* 2. Allocate from it */
@@ -35,8 +35,8 @@ static int test_multiple_pools() {
   void* mem1 = malloc(pool_size);
   void* mem2 = malloc(pool_size);
   
-  tlsf_t a1 = mm_create(mem1, pool_size);
-  tlsf_t a2 = mm_create(mem2, pool_size);
+  tlsf_t a1 = mm_create_with_pool(mem1, pool_size);
+  tlsf_t a2 = mm_create_with_pool(mem2, pool_size);
   
   ASSERT_NOT_NULL(a1);
   ASSERT_NOT_NULL(a2);

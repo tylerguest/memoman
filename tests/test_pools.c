@@ -6,7 +6,7 @@ static int test_allocation_across_pools(void) {
   /* Pool 1: ~12KB. 
    * mm_size() is ~8KB, leaving ~4KB for allocation. */
   uint8_t pool1[12288] __attribute__((aligned(8)));
-  tlsf_t alloc = mm_create(pool1, sizeof(pool1));
+  tlsf_t alloc = mm_create_with_pool(pool1, sizeof(pool1));
   
   /* Fill Pool 1 */
   void* p1 = (mm_malloc)(alloc, 3000);

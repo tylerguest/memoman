@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 static tlsf_t make_two_pool_allocator(uint8_t* pool1, size_t bytes1, uint8_t* pool2, size_t bytes2, pool_t* out_pool2) {
-  tlsf_t alloc = mm_create(pool1, bytes1);
+  tlsf_t alloc = mm_create_with_pool(pool1, bytes1);
   ASSERT_NOT_NULL(alloc);
   pool_t p2 = mm_add_pool(alloc, pool2, bytes2);
   ASSERT_NOT_NULL(p2);
@@ -15,7 +15,7 @@ static tlsf_t make_two_pool_allocator(uint8_t* pool1, size_t bytes1, uint8_t* po
 
 static int test_detects_fl_sl_bitmap_mismatch(void) {
   uint8_t pool1[64 * 1024] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(pool1, sizeof(pool1));
+  tlsf_t alloc = mm_create_with_pool(pool1, sizeof(pool1));
   ASSERT_NOT_NULL(alloc);
   struct mm_allocator_t* ctrl = (struct mm_allocator_t*)alloc;
 
@@ -28,7 +28,7 @@ static int test_detects_fl_sl_bitmap_mismatch(void) {
 
 static int test_detects_free_block_missing_from_list(void) {
   uint8_t pool1[64 * 1024] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(pool1, sizeof(pool1));
+  tlsf_t alloc = mm_create_with_pool(pool1, sizeof(pool1));
   ASSERT_NOT_NULL(alloc);
   struct mm_allocator_t* ctrl = (struct mm_allocator_t*)alloc;
 
@@ -65,7 +65,7 @@ static int test_detects_free_block_missing_from_list(void) {
 
 static int test_detects_prev_free_inconsistency(void) {
   uint8_t pool1[64 * 1024] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(pool1, sizeof(pool1));
+  tlsf_t alloc = mm_create_with_pool(pool1, sizeof(pool1));
   ASSERT_NOT_NULL(alloc);
 
   void* a = (mm_malloc)(alloc, 256);

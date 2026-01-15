@@ -16,7 +16,7 @@ int main(void) { return 0; }
 
 static int test_free_ignores_non_owned_pointer(void) {
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   uint8_t not_owned[64] __attribute__((aligned(16)));
@@ -27,7 +27,7 @@ static int test_free_ignores_non_owned_pointer(void) {
 
 static int test_realloc_rejects_non_owned_pointer(void) {
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   uint8_t not_owned[64] __attribute__((aligned(16)));
@@ -39,7 +39,7 @@ static int test_realloc_rejects_non_owned_pointer(void) {
 
 static int test_free_rejects_interior_pointer(void) {
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   void* p = (mm_malloc)(alloc, 128);
@@ -57,7 +57,7 @@ static int test_free_rejects_interior_pointer(void) {
 
 static int test_realloc_rejects_interior_pointer(void) {
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   void* p = (mm_malloc)(alloc, 128);

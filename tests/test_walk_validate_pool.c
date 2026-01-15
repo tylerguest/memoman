@@ -29,26 +29,26 @@ static int test_validate_pool_smoke(void) {
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
   uint8_t pool2[128 * 1024] __attribute__((aligned(16)));
 
-  tlsf_t alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   pool_t p0 = mm_get_pool(alloc);
   ASSERT_NOT_NULL(p0);
-  ASSERT((mm_validate_pool)(alloc, p0));
+  ASSERT((mm_validate_pool)(p0));
 
   void* a = (mm_malloc)(alloc, 1024);
   ASSERT_NOT_NULL(a);
 
   pool_t p2 = mm_add_pool(alloc, pool2, sizeof(pool2));
   ASSERT_NOT_NULL(p2);
-  ASSERT((mm_validate_pool)(alloc, p2));
+  ASSERT((mm_validate_pool)(p2));
 
   void* b = (mm_malloc)(alloc, 64 * 1024);
   ASSERT_NOT_NULL(b);
 
   ASSERT((mm_validate)(alloc));
-  ASSERT((mm_validate_pool)(alloc, p0));
-  ASSERT((mm_validate_pool)(alloc, p2));
+  ASSERT((mm_validate_pool)(p0));
+  ASSERT((mm_validate_pool)(p2));
 
   (mm_free)(alloc, a);
   (mm_free)(alloc, b);
@@ -61,7 +61,7 @@ static int test_walk_pool_counts(void) {
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
   uint8_t pool2[128 * 1024] __attribute__((aligned(16)));
 
-  tlsf_t alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   void* a = (mm_malloc)(alloc, 1024);
@@ -100,7 +100,7 @@ static int test_walk_pool_counts(void) {
 
 static int test_validate_pool_detects_corruption(void) {
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(backing, sizeof(backing));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   pool_t p0 = mm_get_pool(alloc);
@@ -112,7 +112,7 @@ static int test_validate_pool_detects_corruption(void) {
   tlsf_block_t* block = (tlsf_block_t*)((char*)a - BLOCK_START_OFFSET);
   block->size = ((size_t)1 << 20) | (block->size & ~TLSF_SIZE_MASK);
 
-  ASSERT(!(mm_validate_pool)(alloc, p0));
+  ASSERT(!(mm_validate_pool)(p0));
   return 1;
 }
 

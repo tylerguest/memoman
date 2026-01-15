@@ -26,7 +26,7 @@ static void* _test_pool = NULL;
 static inline void _test_init(void) {
     if (_test_pool) return;
     _test_pool = malloc(TEST_POOL_SIZE);
-    _test_allocator = mm_create(_test_pool, TEST_POOL_SIZE);
+    _test_allocator = mm_create_with_pool(_test_pool, TEST_POOL_SIZE);
 }
 
 static inline void _test_destroy(void) {

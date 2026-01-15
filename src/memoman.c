@@ -536,7 +536,7 @@ int mm_validate(tlsf_t tlsf) {
   for (size_t i = 0; i < MM_MAX_POOLS; i++) {
     if (!ctrl->pools[i].active) continue;
     pools_bytes += ctrl->pools[i].bytes;
-    CHECK(mm_validate_pool(tlsf, (pool_t)&ctrl->pools[i]), "Pool validation failed");
+    CHECK(mm_validate_pool((pool_t)&ctrl->pools[i]), "Pool validation failed");
   }
   CHECK(pools_bytes == ctrl->total_pool_size, "total_pool_size does not match sum of pools");
 
@@ -666,12 +666,14 @@ int mm_validate(tlsf_t tlsf) {
   return 1;
 }
 
-int mm_validate_pool(tlsf_t tlsf, pool_t pool) {
-  mm_allocator_t* alloc = (mm_allocator_t*)tlsf;
-  if (!alloc || !pool) return 0;
+int mm_validate_pool(pool_t pool) {
+  if (!pool) return 0;
 
-  mm_pool_desc_t* desc = pool_desc_from_handle(alloc, pool);
-  if (!desc) return 0;
+  mm_pool_desc_t* desc = (mm_pool_desc_t*)pool;
+  if (!desc->active) return 0;
+  if (!desc->start || !desc->end) return 0;
+  if (desc->bytes == 0) return 0;
+  if (desc->end != (desc->start + (ptrdiff_t)desc->bytes)) return 0;
 
   tlsf_block_t* block = (tlsf_block_t*)desc->start;
   tlsf_block_t* epilogue = (tlsf_block_t*)(desc->end - BLOCK_HEADER_OVERHEAD);
@@ -759,32 +761,35 @@ static void mm_check_integrity(mm_allocator_t* ctrl) {
 /*
 ** Public API.
 */
-tlsf_t mm_create(void* mem, size_t bytes) {
-  /* Overhead: Allocator + Alignment Padding + Min Block + Epilogue */
-  size_t overhead = sizeof(mm_allocator_t) + ALIGNMENT + BLOCK_HEADER_OVERHEAD + BLOCK_HEADER_OVERHEAD;
-  if (bytes < overhead + TLSF_MIN_BLOCK_SIZE) return NULL;
-
+tlsf_t mm_create(void* mem) {
+  /* Control-only create (TLSF-style): does not implicitly consume remaining bytes as a pool. */
+  if (!mem) return NULL;
   /* Ensure provided memory is aligned */
   if ((uintptr_t)mem % ALIGNMENT != 0) return NULL;
 
   mm_allocator_t* allocator = (mm_allocator_t*)mem;
   memset(allocator, 0, sizeof(mm_allocator_t));
 
-  /* Add the rest of the memory as the first pool */
-  void* pool_mem = (char*)mem + sizeof(mm_allocator_t);
-  size_t pool_bytes = bytes - sizeof(mm_allocator_t);
-  
-  if (!mm_add_pool((tlsf_t)allocator, pool_mem, pool_bytes)) return NULL;
-
   return (tlsf_t)allocator;
 }
 
 tlsf_t mm_create_with_pool(void* mem, size_t bytes) {
-  return mm_create(mem, bytes);
+  /* Overhead: Allocator + Alignment Padding + Min Block + Epilogue */
+  size_t overhead = sizeof(mm_allocator_t) + ALIGNMENT + BLOCK_HEADER_OVERHEAD + BLOCK_HEADER_OVERHEAD;
+  if (bytes < overhead + TLSF_MIN_BLOCK_SIZE) return NULL;
+
+  tlsf_t tlsf = mm_create(mem);
+  if (!tlsf) return NULL;
+
+  void* pool_mem = (char*)mem + sizeof(mm_allocator_t);
+  size_t pool_bytes = bytes - sizeof(mm_allocator_t);
+
+  if (!mm_add_pool(tlsf, pool_mem, pool_bytes)) return NULL;
+  return tlsf;
 }
 
 tlsf_t mm_init_in_place(void* mem, size_t bytes) {
-  return mm_create(mem, bytes);
+  return mm_create_with_pool(mem, bytes);
 }
 
 void mm_destroy(tlsf_t alloc) {
@@ -972,23 +977,23 @@ void mm_remove_pool(tlsf_t tlsf, pool_t pool) {
   desc->live_allocations = 0;
 }
 
-void* mm_malloc(tlsf_t tlsf, size_t size) {
+void* mm_malloc(tlsf_t tlsf, size_t bytes) {
   mm_allocator_t* ctrl = (mm_allocator_t*)tlsf;
-  if (!ctrl || size == 0) return NULL;
+  if (!ctrl || bytes == 0) return NULL;
   mm_check_integrity(ctrl);
 
-  if (size < TLSF_MIN_BLOCK_SIZE) size = TLSF_MIN_BLOCK_SIZE;
-  if (size >= BLOCK_SIZE_MAX) return NULL;
-  if (size > SIZE_MAX - (ALIGNMENT - 1)) return NULL;
-  size = align_size(size);
-  if (size >= BLOCK_SIZE_MAX) return NULL;
+  if (bytes < TLSF_MIN_BLOCK_SIZE) bytes = TLSF_MIN_BLOCK_SIZE;
+  if (bytes >= BLOCK_SIZE_MAX) return NULL;
+  if (bytes > SIZE_MAX - (ALIGNMENT - 1)) return NULL;
+  bytes = align_size(bytes);
+  if (bytes >= BLOCK_SIZE_MAX) return NULL;
 
   int fl, sl;
-  tlsf_block_t* block = search_suitable_block(ctrl, size, &fl, &sl);
+  tlsf_block_t* block = search_suitable_block(ctrl, bytes, &fl, &sl);
   if (!block) return NULL;
 
   remove_free_block_direct(ctrl, block, fl, sl);
-  tlsf_block_t* remainder = split_block(ctrl, block, size);
+  tlsf_block_t* remainder = split_block(ctrl, block, bytes);
   if (remainder) {
     /* Coalesce remainder with next block if it is free */
     remainder = coalesce(ctrl, remainder);
@@ -1150,19 +1155,19 @@ void* mm_realloc(tlsf_t tlsf, void* ptr, size_t size) {
   return new_ptr;
 }
 
-void* mm_memalign(tlsf_t tlsf, size_t alignment, size_t size) {
+void* mm_memalign(tlsf_t tlsf, size_t align, size_t bytes) {
   mm_allocator_t* ctrl = (mm_allocator_t*)tlsf;
   if (!ctrl) return NULL;
-  if (alignment == 0 || (alignment & (alignment - 1)) != 0) return NULL; /* must be power of two */
-  if (size == 0) return NULL;
+  if (align == 0 || (align & (align - 1)) != 0) return NULL; /* must be power of two */
+  if (bytes == 0) return NULL;
 
   /* If alignment is <= default alignment, regular malloc suffices */
-  if (alignment <= ALIGNMENT) return mm_malloc(tlsf, size);
+  if (align <= ALIGNMENT) return mm_malloc(tlsf, bytes);
 
   mm_check_integrity(ctrl);
 
   /* Normalize requested size */
-  size_t requested_size = (size < TLSF_MIN_BLOCK_SIZE) ? TLSF_MIN_BLOCK_SIZE : size;
+  size_t requested_size = (bytes < TLSF_MIN_BLOCK_SIZE) ? TLSF_MIN_BLOCK_SIZE : bytes;
   requested_size = align_size(requested_size);
 
   /*
@@ -1172,12 +1177,12 @@ void* mm_memalign(tlsf_t tlsf, size_t alignment, size_t size) {
   */
   const size_t gap_minimum = BLOCK_HEADER_OVERHEAD + TLSF_MIN_BLOCK_SIZE;
   if (requested_size >= BLOCK_SIZE_MAX) return NULL;
-  if (alignment > SIZE_MAX - requested_size) return NULL;
-  size_t size_with_gap = requested_size + alignment;
+  if (align > SIZE_MAX - requested_size) return NULL;
+  size_t size_with_gap = requested_size + align;
   if (gap_minimum > SIZE_MAX - size_with_gap) return NULL;
   size_with_gap += gap_minimum;
-  if (size_with_gap > SIZE_MAX - (alignment - 1)) return NULL;
-  size_t search_size = (size_with_gap + (alignment - 1)) & ~(alignment - 1);
+  if (size_with_gap > SIZE_MAX - (align - 1)) return NULL;
+  size_t search_size = (size_with_gap + (align - 1)) & ~(align - 1);
   if (search_size >= BLOCK_SIZE_MAX) return NULL;
 
   int fl = 0, sl = 0;
@@ -1190,14 +1195,14 @@ void* mm_memalign(tlsf_t tlsf, size_t alignment, size_t size) {
   size_t orig_size = block_size(block);
 
   uintptr_t user_addr = (uintptr_t)block_to_user(block);
-  uintptr_t aligned_user = (user_addr + (alignment - 1)) & ~(alignment - 1);
+  uintptr_t aligned_user = (user_addr + (align - 1)) & ~(align - 1);
   size_t gap = (size_t)(aligned_user - user_addr);
 
   if (gap && gap < gap_minimum) {
     const size_t gap_remain = gap_minimum - gap;
-    const size_t offset = (gap_remain > alignment) ? gap_remain : alignment;
+    const size_t offset = (gap_remain > align) ? gap_remain : align;
     /* Conte semantics: advance from the *first* aligned boundary, not from the raw pointer. */
-    aligned_user = ((aligned_user + offset) + (alignment - 1)) & ~(alignment - 1);
+    aligned_user = ((aligned_user + offset) + (align - 1)) & ~(align - 1);
     gap = (size_t)(aligned_user - user_addr);
   }
 

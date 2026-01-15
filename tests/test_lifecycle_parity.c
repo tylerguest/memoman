@@ -8,10 +8,23 @@ static int test_destroy_null_noop(void) {
 
 static int test_create_in_place(void) {
   uint8_t pool[64 * 1024] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(pool, sizeof(pool));
+  tlsf_t alloc = mm_create(pool);
   ASSERT_NOT_NULL(alloc);
   ASSERT_EQ((void*)alloc, (void*)pool);
+
+  /* TLSF-style create: control-only (no implicit pool). */
+  ASSERT_NULL(mm_get_pool(alloc));
+  ASSERT_NULL((mm_malloc)(alloc, 16));
   ASSERT((mm_validate)(alloc));
+
+  /* Caller can add a pool explicitly. */
+  pool_t p0 = mm_add_pool(alloc, (uint8_t*)pool + mm_size(), sizeof(pool) - mm_size());
+  ASSERT_NOT_NULL(p0);
+  void* p = (mm_malloc)(alloc, 128);
+  ASSERT_NOT_NULL(p);
+  (mm_free)(alloc, p);
+  ASSERT((mm_validate)(alloc));
+
   (mm_destroy)(alloc);
   return 1;
 }
@@ -39,6 +52,13 @@ static int test_init_in_place_alias(void) {
   ASSERT_NOT_NULL(alloc);
   ASSERT_EQ((void*)alloc, (void*)pool);
   ASSERT((mm_validate)(alloc));
+
+  ASSERT_NOT_NULL(mm_get_pool(alloc));
+  void* p = (mm_malloc)(alloc, 128);
+  ASSERT_NOT_NULL(p);
+  (mm_free)(alloc, p);
+  ASSERT((mm_validate)(alloc));
+
   (mm_destroy)(alloc);
   return 1;
 }
@@ -58,7 +78,7 @@ static int test_create_requires_alignment(void) {
 
 static int test_create_requires_minimum_size(void) {
   uint8_t pool[128] __attribute__((aligned(16)));
-  tlsf_t alloc = mm_create(pool, sizeof(pool));
+  tlsf_t alloc = mm_create_with_pool(pool, sizeof(pool));
   ASSERT_NULL(alloc);
   return 1;
 }

@@ -44,7 +44,7 @@ static void* bench_pool = NULL;
 void mm_init_wrapper(void) {
     bench_pool = malloc(BENCH_POOL_SIZE);
     if (!bench_pool) { perror("malloc failed"); exit(1); }
-    bench_allocator = mm_create(bench_pool, BENCH_POOL_SIZE);
+    bench_allocator = mm_create_with_pool(bench_pool, BENCH_POOL_SIZE);
 }
 
 void mm_destroy_wrapper(void) {

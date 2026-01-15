@@ -20,7 +20,7 @@ int main(void) {
   static uint8_t pool1[128 * 1024] __attribute__((aligned(16)));
   static uint8_t pool2[128 * 1024] __attribute__((aligned(16)));
 
-  tlsf_t mm = mm_create(pool1, sizeof(pool1));
+  tlsf_t mm = mm_create_with_pool(pool1, sizeof(pool1));
   if (!mm) {
     printf("mm_create failed\n");
     return 1;

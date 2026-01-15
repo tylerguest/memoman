@@ -7,7 +7,7 @@ static int test_demo_flow(void) {
   uint8_t pool1[128 * 1024] __attribute__((aligned(16)));
   uint8_t pool2[128 * 1024] __attribute__((aligned(16)));
 
-  tlsf_t mm = mm_create(pool1, sizeof(pool1));
+  tlsf_t mm = mm_create_with_pool(pool1, sizeof(pool1));
   ASSERT_NOT_NULL(mm);
 
   void* a = (mm_malloc)(mm, 24);

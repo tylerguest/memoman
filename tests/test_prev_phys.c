@@ -11,7 +11,7 @@ static inline tlsf_block_t* block_prev_link_local(const tlsf_block_t* block) {
 }
 
 static tlsf_t make_allocator(uint8_t* backing, size_t bytes) {
-  tlsf_t alloc = mm_create(backing, bytes);
+  tlsf_t alloc = mm_create_with_pool(backing, bytes);
   ASSERT_NOT_NULL(alloc);
   return alloc;
 }

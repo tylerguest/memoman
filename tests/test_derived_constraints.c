@@ -22,7 +22,7 @@ static int test_derived_constants_sane(void) {
 
 static int test_split_respects_min_block_size(void) {
   uint8_t pool[32768] __attribute__((aligned(ALIGNMENT)));
-  tlsf_t alloc = mm_create(pool, sizeof(pool));
+  tlsf_t alloc = mm_create_with_pool(pool, sizeof(pool));
   ASSERT_NOT_NULL(alloc);
 
   uintptr_t pool_base = (uintptr_t)alloc + mm_size();
@@ -65,7 +65,7 @@ static int test_split_respects_min_block_size(void) {
    * should not split, and should reuse the entire free block.
    */
   uint8_t pool2[32768] __attribute__((aligned(ALIGNMENT)));
-  tlsf_t alloc2 = mm_create(pool2, sizeof(pool2));
+  tlsf_t alloc2 = mm_create_with_pool(pool2, sizeof(pool2));
   ASSERT_NOT_NULL(alloc2);
 
   void* g1 = (mm_malloc)(alloc2, 64);
