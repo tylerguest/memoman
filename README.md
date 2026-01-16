@@ -35,9 +35,12 @@ It is designed for real-time and embedded workloads where predictability matters
 ## Quick Build & Test
 
 ```bash
-make run          # build + run all tests
-make benchmark    # optimized build (for benchmark suite)
-make demo         # build demo binary
+make run                    # build + run all tests (summary output)
+make run DEBUG=1            # stream full per-test output
+make run TIMING=1           # show per-test timing
+make run DEBUG=1 TIMING=1   # full output + timing
+make benchmark              # optimized build (for benchmark suite)
+make demo                   # build demo binary
 ./demo
 ```
 
