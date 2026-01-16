@@ -11,7 +11,7 @@
 **
 ** Alignment rules:
 ** - `mm_create()`/`mm_create_with_pool()` require `mem` aligned to `sizeof(size_t)`.
-** - `mm_add_pool()` accepts any `mem`; it aligns the pool start up to `sizeof(size_t)` (reducing usable bytes).
+** - `mm_add_pool()` requires `mem` and `bytes` aligned to `sizeof(size_t)`; misaligned pools are rejected.
 */
 
 #include <stddef.h>

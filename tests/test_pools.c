@@ -1,6 +1,10 @@
 #include "test_framework.h"
 #include "../src/memoman.h"
+#include "memoman_test_internal.h"
 #include <stdint.h>
+
+static inline size_t block_size(const tlsf_block_t* block) { return block->size & TLSF_SIZE_MASK; }
+static inline int block_is_prev_free(const tlsf_block_t* block) { return (block->size & TLSF_PREV_FREE) != 0; }
 
 static int test_allocation_across_pools(void) {
   /* Pool 1: ~12KB. 
@@ -33,13 +37,25 @@ static int test_allocation_across_pools(void) {
   return 1;
 }
 
-static int test_add_pool_aligns_end(void) {
+static int test_add_pool_rejects_misaligned_start(void) {
+  uint8_t backing[64 * 1024] __attribute__((aligned(16)));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
+  ASSERT_NOT_NULL(alloc);
+
+  uint8_t pool2[8192] __attribute__((aligned(16)));
+  void* misaligned = (void*)((uintptr_t)pool2 + 1);
+  ASSERT_NULL(mm_add_pool(alloc, misaligned, sizeof(pool2) - 1));
+  ASSERT((mm_validate)(alloc));
+  return 1;
+}
+
+static int test_add_pool_rejects_misaligned_size(void) {
   uint8_t backing[64 * 1024] __attribute__((aligned(16)));
   tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
   ASSERT_NOT_NULL(alloc);
 
   uint8_t pool2[8193] __attribute__((aligned(16)));
-  ASSERT_NOT_NULL(mm_add_pool(alloc, pool2, sizeof(pool2)));
+  ASSERT_NULL(mm_add_pool(alloc, pool2, sizeof(pool2)));
   ASSERT((mm_validate)(alloc));
   return 1;
 }
@@ -59,6 +75,34 @@ static int test_add_pool_rejects_overlap(void) {
   return 1;
 }
 
+static int test_pool_layout_prev_phys_outside_pool(void) {
+  uint8_t backing[64 * 1024] __attribute__((aligned(16)));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
+  ASSERT_NOT_NULL(alloc);
+
+  pool_t pool = mm_get_pool(alloc);
+  ASSERT_NOT_NULL(pool);
+
+  tlsf_block_t* first = (tlsf_block_t*)pool;
+  ASSERT_EQ(block_is_prev_free(first), 0);
+
+  mm_pool_desc_t* desc = NULL;
+  struct mm_allocator_t* ctrl = (struct mm_allocator_t*)alloc;
+  for (size_t i = 0; i < MM_MAX_POOLS; i++) {
+    if (!ctrl->pools[i].active) continue;
+    if ((pool_t)ctrl->pools[i].start == pool) {
+      desc = &ctrl->pools[i];
+      break;
+    }
+  }
+  ASSERT_NOT_NULL(desc);
+
+  tlsf_block_t* epilogue = (tlsf_block_t*)((char*)desc->end - BLOCK_HEADER_OVERHEAD);
+  ASSERT(block_size(epilogue) == 0);
+  ASSERT(block_is_prev_free(epilogue));
+  return 1;
+}
+
 int main(void) {
   /* 
    * Note: These tests use stack-allocated pools and do not use the 
@@ -67,8 +111,10 @@ int main(void) {
   printf("\n" COLOR_BOLD "=== Discontiguous Pools ===" COLOR_RESET "\n");
   
   RUN_TEST(test_allocation_across_pools);
-  RUN_TEST(test_add_pool_aligns_end);
+  RUN_TEST(test_add_pool_rejects_misaligned_start);
+  RUN_TEST(test_add_pool_rejects_misaligned_size);
   RUN_TEST(test_add_pool_rejects_overlap);
+  RUN_TEST(test_pool_layout_prev_phys_outside_pool);
   
   TEST_MAIN_END();
 }

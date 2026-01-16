@@ -26,7 +26,7 @@ It is designed for real-time and embedded workloads where predictability matters
 ## Constraints and Invariants
 
 - `mm_create()` and `mm_create_with_pool()` require the control buffer aligned to `sizeof(size_t)`.
-- `mm_add_pool()` accepts unaligned buffers but aligns the pool start up to `sizeof(size_t)` and reduces usable bytes.
+- `mm_add_pool()` requires `mem` and `bytes` aligned to `sizeof(size_t)`; misaligned pools are rejected.
 - Pools must be large enough for allocator overhead and at least one minimum block. Use
   `mm_pool_overhead()` and `mm_block_size_min()` to size pools.
 - Maximum pools per allocator: **32** (`MM_MAX_POOLS`).

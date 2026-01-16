@@ -5,7 +5,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-
 #include "memoman.h"
 
 /* Internal control structure type. The public API uses opaque `tlsf_t` handles. */
@@ -341,6 +340,8 @@ void mm_get_mapping_search_indices(size_t size, int* fl, int* sl) { mapping_sear
 static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* block) {
   size_t sz = block_size(block);
   if (sz == 0) return NULL; /* epilogue */
+  if (sz > SIZE_MAX - BLOCK_HEADER_OVERHEAD) return NULL;
+
   tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
   /* With discontiguous pools, we rely on sentinel blocks (size 0) to stop iteration. */
   (void)ctrl;
@@ -359,6 +360,9 @@ static inline int mm_block_ptr_in_pool(const mm_pool_desc_t* desc, const tlsf_bl
 }
 
 static inline int mm_block_header_sane(const mm_pool_desc_t* desc, const tlsf_block_t* block) {
+  if (!desc || !desc->start || !desc->end) return 0;
+  if (desc->bytes == 0) return 0;
+  if (desc->end <= desc->start) return 0;
   if (!mm_block_ptr_in_pool(desc, block)) return 0;
   size_t sz = block_size((tlsf_block_t*)block);
   if (sz < TLSF_MIN_BLOCK_SIZE) return 0;
@@ -366,12 +370,16 @@ static inline int mm_block_header_sane(const mm_pool_desc_t* desc, const tlsf_bl
 
   uintptr_t block_addr = (uintptr_t)block;
   uintptr_t end_addr = (uintptr_t)desc->end;
-  if (block_addr > end_addr - BLOCK_HEADER_OVERHEAD) return 0;
+  if (block_addr > end_addr) return 0;
+  if ((end_addr - block_addr) < BLOCK_HEADER_OVERHEAD) return 0;
+
   size_t max_payload = (size_t)(end_addr - block_addr - BLOCK_HEADER_OVERHEAD);
   if (sz > max_payload) return 0;
+  if (sz > SIZE_MAX - BLOCK_HEADER_OVERHEAD) return 0;
 
   tlsf_block_t* epilogue = (tlsf_block_t*)((char*)desc->end - BLOCK_HEADER_OVERHEAD);
-  uintptr_t end = (uintptr_t)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
+  uintptr_t end = block_addr + BLOCK_HEADER_OVERHEAD + sz;
+  if (end < block_addr) return 0;
   if (end > (uintptr_t)epilogue) return 0;
   return 1;
 }
@@ -475,6 +483,7 @@ static inline mm_ptr_check_t mm_ptr_to_block_checked(
 #else
   tlsf_block_t* block = user_to_block(ptr);
   if (!mm_block_header_sane(pool_desc, block)) return MM_PTR_INVALID;
+  if (block_to_user(block) != ptr) return MM_PTR_INVALID;
   if (block_is_prev_free(block)) {
     tlsf_block_t* prev = block_prev(block);
     if (!mm_block_header_sane(pool_desc, prev)) return MM_PTR_INVALID;
@@ -529,7 +538,7 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
 
   if (block_is_prev_free(block)) {
     tlsf_block_t* prev = block_prev(block);
-    if (!mm_block_header_sane(pool_desc, prev) || !block_is_free(prev) || (block_next_safe(ctrl, prev) != block)) {
+    if (!mm_block_ptr_in_pool(pool_desc, prev) || !mm_block_header_sane(pool_desc, prev) || !block_is_free(prev) || (block_next_safe(ctrl, prev) != block)) {
       block_set_prev_used(block);
     } else {
       remove_free_block(ctrl, prev);
@@ -537,7 +546,7 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
       block_set_size(prev, combined);
 
       tlsf_block_t* next = block_next_safe(ctrl, prev);
-      if (next) {
+      if (next && mm_block_ptr_in_pool(pool_desc, next)) {
         block_set_prev_free(next);
         block_set_prev(next, prev);
       }
@@ -546,14 +555,14 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
   }
 
   tlsf_block_t* next = block_next_safe(ctrl, block);
-  if (next && block_is_free(next)) {
+  if (next && mm_block_ptr_in_pool(pool_desc, next) && block_is_free(next)) {
     if (mm_block_header_sane(pool_desc, next) && block_is_prev_free(next) && block_prev(next) == block) {
       remove_free_block(ctrl, next);
       size_t combined = block_size(block) + BLOCK_HEADER_OVERHEAD + block_size(next);
       block_set_size(block, combined);
 
       tlsf_block_t* next_next = block_next_safe(ctrl, block);
-      if (next_next) {
+      if (next_next && mm_block_ptr_in_pool(pool_desc, next_next)) {
         block_set_prev_free(next_next);
         block_set_prev(next_next, block);
       }
@@ -938,10 +947,11 @@ pool_t mm_add_pool(tlsf_t tlsf, void* mem, size_t bytes) {
   if (bytes < overhead + TLSF_MIN_BLOCK_SIZE) return NULL;
 
   uintptr_t start_addr = (uintptr_t)mem;
-  uintptr_t aligned_addr = (start_addr + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
-  char* pool_start = (char*)aligned_addr;
-  size_t aligned_bytes = bytes - (aligned_addr - start_addr);
-  aligned_bytes &= ~(ALIGNMENT - 1);
+  if ((start_addr % ALIGNMENT) != 0) return NULL;
+  if ((bytes % ALIGNMENT) != 0) return NULL;
+
+  char* pool_start = (char*)mem;
+  size_t aligned_bytes = bytes;
 
   /* Check if alignment ate too much */
   if (aligned_bytes < overhead + TLSF_MIN_BLOCK_SIZE) return NULL;
@@ -1239,72 +1249,74 @@ void* mm_memalign(tlsf_t tlsf, size_t align, size_t bytes) {
   size_t requested_size = (bytes < TLSF_MIN_BLOCK_SIZE) ? TLSF_MIN_BLOCK_SIZE : bytes;
   requested_size = align_size(requested_size);
 
-  /*
-  ** Conte TLSF requires an extra minimum free block worth of space so that if
-  ** the alignment gap would be too small to split, we can advance to the next
-  ** aligned boundary and still trim a valid leading free block.
-  */
   const size_t gap_minimum = BLOCK_HEADER_OVERHEAD + TLSF_MIN_BLOCK_SIZE;
   if (requested_size >= BLOCK_SIZE_MAX) return NULL;
-  if (align > SIZE_MAX - requested_size) return NULL;
-  size_t size_with_gap = requested_size + align;
-  if (gap_minimum > SIZE_MAX - size_with_gap) return NULL;
-  size_with_gap += gap_minimum;
-  if (size_with_gap > SIZE_MAX - (align - 1)) return NULL;
-  size_t search_size = (size_with_gap + (align - 1)) & ~(align - 1);
-  if (search_size >= BLOCK_SIZE_MAX) return NULL;
+
+  size_t aligned_size = requested_size;
+  if (requested_size && align > ALIGNMENT) {
+    if (requested_size > SIZE_MAX - align) return NULL;
+    size_t size_with_gap = requested_size + align;
+    if (size_with_gap > SIZE_MAX - gap_minimum) return NULL;
+    size_with_gap += gap_minimum;
+
+    size_t align_mask = align - 1;
+    if (size_with_gap > SIZE_MAX - align_mask) return NULL;
+    aligned_size = (size_with_gap + align_mask) & ~align_mask;
+  }
+
+  if (aligned_size >= BLOCK_SIZE_MAX) return NULL;
 
   int fl = 0, sl = 0;
-  tlsf_block_t* block = search_suitable_block(ctrl, search_size, &fl, &sl);
+  tlsf_block_t* block = search_suitable_block(ctrl, aligned_size, &fl, &sl);
   if (!block) return NULL;
 
   /* Remove the chosen free block from free lists */
   remove_free_block_direct(ctrl, block, fl, sl);
 
   size_t orig_size = block_size(block);
-
   uintptr_t user_addr = (uintptr_t)block_to_user(block);
   uintptr_t aligned_user = (user_addr + (align - 1)) & ~(align - 1);
   size_t gap = (size_t)(aligned_user - user_addr);
 
   if (gap && gap < gap_minimum) {
-    const size_t gap_remain = gap_minimum - gap;
-    const size_t offset = (gap_remain > align) ? gap_remain : align;
-    /* Conte semantics: advance from the *first* aligned boundary, not from the raw pointer. */
-    aligned_user = ((aligned_user + offset) + (align - 1)) & ~(align - 1);
+    size_t gap_remain = gap_minimum - gap;
+    size_t offset = (gap_remain > align) ? gap_remain : align;
+    uintptr_t next_aligned = aligned_user + offset;
+    aligned_user = (next_aligned + (align - 1)) & ~(align - 1);
     gap = (size_t)(aligned_user - user_addr);
   }
 
   tlsf_block_t* aligned_block = block;
 
   if (gap) {
-    /* Trim a leading free block (gap must be large enough to be a valid free block). */
     if (gap < gap_minimum) {
       insert_free_block(ctrl, block);
       mm_check_integrity(ctrl);
       return NULL;
     }
 
-    /* Leading prefix becomes a free block using the original header. */
-    const size_t prefix_payload = gap - BLOCK_HEADER_OVERHEAD;
-    const size_t aligned_payload = orig_size - gap;
-
+    size_t prefix_payload = gap - BLOCK_HEADER_OVERHEAD;
     block_set_size(block, prefix_payload);
     block_set_free(block);
 
     aligned_block = (tlsf_block_t*)((char*)block + gap);
     aligned_block->size = 0;
+    size_t aligned_payload = orig_size - gap;
     block_set_size(aligned_block, aligned_payload);
     block_set_free(aligned_block);
     block_set_prev_free(aligned_block);
     block_set_prev(aligned_block, block);
 
+    tlsf_block_t* next = block_next_safe(ctrl, aligned_block);
+    if (next) {
+      block_set_prev_free(next);
+      block_set_prev(next, aligned_block);
+    }
+
     insert_free_block(ctrl, block);
   }
 
-  /* At this point aligned_block points to a free block with sufficient space */
   if (block_size(aligned_block) < requested_size) {
-    /* Should not happen, but guard */
     insert_free_block(ctrl, aligned_block);
     mm_check_integrity(ctrl);
     return NULL;

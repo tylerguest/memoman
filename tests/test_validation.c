@@ -51,9 +51,19 @@ static int test_corrupt_alignment() {
 }
 
 static int test_corrupt_overflow() {
-  /* Skipped: Without physical heap walk, we cannot easily detect 
-   * if a block size extends beyond the pool boundaries unless 
-   * we track all pools. */
+  TEST_RESET();
+  void* p = mm_malloc(64);
+  ASSERT_NOT_NULL(p);
+
+  tlsf_block_t* b = get_block(p);
+  size_t original_size = b->size;
+
+  b->size = TLSF_PREV_FREE | (SIZE_MAX - BLOCK_HEADER_OVERHEAD + 1);
+  int result = mm_validate();
+
+  b->size = original_size;
+  ASSERT(result == 0);
+  mm_free(p);
   return 1;
 }
 
@@ -86,7 +96,23 @@ static int test_corrupt_free_list() {
 }
 
 static int test_corrupt_coalescing() {
-  /* Skipped: Requires physical walk to check neighbor flags */
+  TEST_RESET();
+  void* p1 = mm_malloc(64);
+  void* p2 = mm_malloc(64);
+  ASSERT_NOT_NULL(p1);
+  ASSERT_NOT_NULL(p2);
+
+  mm_free(p1);
+  ASSERT(mm_validate());
+
+  tlsf_block_t* b2 = get_block(p2);
+  size_t original_size = b2->size;
+  b2->size |= TLSF_PREV_FREE;
+
+  mm_free(p2);
+  ASSERT(mm_validate());
+
+  b2->size = original_size;
   return 1;
 }
 
