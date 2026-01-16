@@ -82,12 +82,46 @@ static int test_memalign_no_prefix_when_aligned(void) {
   return 1;
 }
 
+static int test_memalign_stress_pattern(void) {
+  uint8_t backing[128 * 1024] __attribute__((aligned(16)));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
+  ASSERT_NOT_NULL(alloc);
+
+  const size_t aligns[] = {16, 32, 64, 128, 256, 512};
+  const size_t sizes[] = {1, 7, 31, 63, 127, 255, 511, 1024, 2048, 4096};
+  const size_t align_count = sizeof(aligns) / sizeof(aligns[0]);
+  const size_t size_count = sizeof(sizes) / sizeof(sizes[0]);
+
+  void* ptrs[32] = {0};
+  size_t idx = 0;
+  for (size_t i = 0; i < align_count; i++) {
+    for (size_t j = 0; j < size_count; j++) {
+      void* p = (mm_memalign)(alloc, aligns[i], sizes[j]);
+      ASSERT_NOT_NULL(p);
+      ASSERT_EQ((uintptr_t)p % aligns[i], 0);
+      ASSERT_GE((mm_block_size)(p), sizes[j]);
+
+      ptrs[idx++] = p;
+      if (idx == (sizeof(ptrs) / sizeof(ptrs[0]))) {
+        for (size_t k = 0; k < idx; k++) (mm_free)(alloc, ptrs[k]);
+        ASSERT((mm_validate)(alloc));
+        idx = 0;
+      }
+    }
+  }
+
+  for (size_t k = 0; k < idx; k++) (mm_free)(alloc, ptrs[k]);
+  ASSERT((mm_validate)(alloc));
+  return 1;
+}
+
 int main(void) {
   TEST_SUITE_BEGIN("Alignment");
   RUN_TEST(test_basic_alignment);
   RUN_TEST(test_memalign_basic);
   RUN_TEST(test_memalign_gap_adjusts_to_minimum);
   RUN_TEST(test_memalign_no_prefix_when_aligned);
+  RUN_TEST(test_memalign_stress_pattern);
   TEST_SUITE_END();
   TEST_MAIN_END();
 }

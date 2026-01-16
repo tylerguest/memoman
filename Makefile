@@ -116,13 +116,30 @@ run: $(TEST_BINS)
 	@failed=0; \
 	for test in $(TEST_BINS); do \
 		name=$$(basename $$test); \
-		output=$$(./$$test 2>&1); \
-		exit_code=$$?; \
-		if [ $$exit_code -eq 0 ]; then \
-			echo "PASSED: $$name"; \
+		if [ "$(TIMING)" = "1" ]; then start=$$(date +%s%N); fi; \
+		if [ "$(DEBUG)" = "1" ]; then \
+			./$$test; \
+			exit_code=$$?; \
 		else \
-			echo "FAILED: $$name (Exit code: $$exit_code)"; \
-			echo "$$output" | sed 's/^/  /'; \
+			output=$$(./$$test 2>&1); \
+			exit_code=$$?; \
+		fi; \
+		if [ "$(TIMING)" = "1" ]; then end=$$(date +%s%N); elapsed_ms=$$((($$end - $$start)/1000000)); fi; \
+		if [ $$exit_code -eq 0 ]; then \
+			if [ "$(TIMING)" = "1" ]; then \
+				echo "PASSED: $$name ($${elapsed_ms}ms)"; \
+			else \
+				echo "PASSED: $$name"; \
+			fi; \
+		else \
+			if [ "$(TIMING)" = "1" ]; then \
+				echo "FAILED: $$name (Exit code: $$exit_code, $${elapsed_ms}ms)"; \
+			else \
+				echo "FAILED: $$name (Exit code: $$exit_code)"; \
+			fi; \
+			if [ "$(DEBUG)" != "1" ]; then \
+				echo "$$output" | sed 's/^/  /'; \
+			fi; \
 			failed=$$((failed + 1)); \
 		fi; \
 	done; \

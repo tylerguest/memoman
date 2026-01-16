@@ -74,6 +74,46 @@ static int test_realloc_rejects_interior_pointer(void) {
   return 1;
 }
 
+static int test_rejects_aligned_interior_pointer(void) {
+  uint8_t backing[64 * 1024] __attribute__((aligned(16)));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
+  ASSERT_NOT_NULL(alloc);
+
+  void* p = (mm_malloc)(alloc, 256);
+  ASSERT_NOT_NULL(p);
+
+  void* interior = (void*)((uintptr_t)p + (2 * ALIGNMENT));
+  ASSERT(((uintptr_t)interior % ALIGNMENT) == 0);
+
+  (mm_free)(alloc, interior);
+  ASSERT((mm_validate)(alloc));
+
+  void* q = (mm_realloc)(alloc, interior, 128);
+  ASSERT_NULL(q);
+  ASSERT((mm_validate)(alloc));
+
+  (mm_free)(alloc, p);
+  ASSERT((mm_validate)(alloc));
+  return 1;
+}
+
+static int test_rejects_pointer_to_prev_footer(void) {
+  uint8_t backing[64 * 1024] __attribute__((aligned(16)));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
+  ASSERT_NOT_NULL(alloc);
+
+  void* p = (mm_malloc)(alloc, 128);
+  ASSERT_NOT_NULL(p);
+
+  void* footer = (void*)((char*)p - sizeof(tlsf_block_t*));
+  (mm_free)(alloc, footer);
+  ASSERT((mm_validate)(alloc));
+
+  (mm_free)(alloc, p);
+  ASSERT((mm_validate)(alloc));
+  return 1;
+}
+
 static int test_free_rejects_forged_header_pointer(void) {
   size_t total_bytes = mm_size() + mm_pool_overhead() + mm_block_size_min();
   uint8_t* backing = malloc(total_bytes);
@@ -108,6 +148,8 @@ int main(void) {
   RUN_TEST(test_realloc_rejects_non_owned_pointer);
   RUN_TEST(test_free_rejects_interior_pointer);
   RUN_TEST(test_realloc_rejects_interior_pointer);
+  RUN_TEST(test_rejects_aligned_interior_pointer);
+  RUN_TEST(test_rejects_pointer_to_prev_footer);
   RUN_TEST(test_free_rejects_forged_header_pointer);
   TEST_SUITE_END();
   TEST_MAIN_END();

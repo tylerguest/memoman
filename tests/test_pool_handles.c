@@ -113,12 +113,62 @@ static int test_remove_pool_with_live_alloc_is_noop(void) {
   return 1;
 }
 
+static int test_remove_pool_rejects_pointer(void) {
+  uint8_t backing[32 * 1024] __attribute__((aligned(16)));
+  uint8_t pool2[32 * 1024] __attribute__((aligned(16)));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
+  ASSERT_NOT_NULL(alloc);
+
+  pool_t p2 = mm_add_pool(alloc, pool2, sizeof(pool2));
+  ASSERT_NOT_NULL(p2);
+
+  void* bogus = (void*)((uintptr_t)p2 + 64);
+  mm_remove_pool(alloc, bogus);
+  ASSERT((mm_validate)(alloc));
+
+  void* p = (mm_malloc)(alloc, 1024);
+  ASSERT_NOT_NULL(p);
+  (mm_free)(alloc, p);
+  ASSERT((mm_validate)(alloc));
+
+  mm_remove_pool(alloc, p2);
+  ASSERT((mm_validate)(alloc));
+
+  return 1;
+}
+
+static int test_remove_pool_rejects_overlap_handle(void) {
+  uint8_t backing[32 * 1024] __attribute__((aligned(16)));
+  uint8_t pool2[64 * 1024] __attribute__((aligned(16)));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
+  ASSERT_NOT_NULL(alloc);
+
+  pool_t p2 = mm_add_pool(alloc, pool2, sizeof(pool2));
+  ASSERT_NOT_NULL(p2);
+
+  void* interior = (void*)((uintptr_t)p2 + 128);
+  mm_remove_pool(alloc, interior);
+  ASSERT((mm_validate)(alloc));
+
+  void* big = (mm_malloc)(alloc, 48 * 1024);
+  ASSERT_NOT_NULL(big);
+  (mm_free)(alloc, big);
+  ASSERT((mm_validate)(alloc));
+
+  mm_remove_pool(alloc, p2);
+  ASSERT((mm_validate)(alloc));
+
+  return 1;
+}
+
 int main(void) {
   TEST_SUITE_BEGIN("pool_handles");
   RUN_TEST(test_get_pool_nonnull);
   RUN_TEST(test_add_pool_returns_handle);
   RUN_TEST(test_remove_pool_empty_disables_allocation);
   RUN_TEST(test_remove_pool_with_live_alloc_is_noop);
+  RUN_TEST(test_remove_pool_rejects_pointer);
+  RUN_TEST(test_remove_pool_rejects_overlap_handle);
   TEST_SUITE_END();
   TEST_MAIN_END();
 }
