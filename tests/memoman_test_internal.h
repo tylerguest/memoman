@@ -26,6 +26,8 @@ typedef struct mm_pool_desc_t {
   size_t bytes;
   size_t live_allocations;
   int active;
+  struct mm_pool_desc_t* next_global;
+  struct mm_pool_desc_t* prev_global;
 } mm_pool_desc_t;
 
 /* The block header exposed to used blocks is a single size word. */

@@ -12,11 +12,13 @@ static int test_tlsf_t_and_pool_t_exist_and_work_with_memoman_api(void) {
   pool_t pool = mm_get_pool(tlsf);
   ASSERT_NOT_NULL(pool);
   ASSERT((mm_validate_pool)(pool));
+  ASSERT_EQ((mm_check_pool)(pool), 0);
 
   void* p = (mm_malloc)(tlsf, 128);
   ASSERT_NOT_NULL(p);
   (mm_free)(tlsf, p);
   ASSERT((mm_validate)(tlsf));
+  ASSERT_EQ((mm_check)(tlsf), 0);
   return 1;
 }
 

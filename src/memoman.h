@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 /* tlsf_t: a TLSF structure. Can contain 1 to N pools. */
-/* pool_t: a block of memory that TLSF can manage. */
+/* pool_t: base address of a managed pool (TLSF-style). */
 typedef void* tlsf_t;
 typedef void* pool_t;
 
@@ -62,6 +62,8 @@ typedef void (*mm_walker)(void* ptr, size_t size, int used, void* user);
 void mm_walk_pool(pool_t pool, mm_walker walker, void* user);
 int mm_validate(tlsf_t alloc);
 int mm_validate_pool(pool_t pool);
+int mm_check(tlsf_t alloc);
+int mm_check_pool(pool_t pool);
 
 /* Memoman extensions (TLSF does not define these). */
 tlsf_t mm_init_in_place(void* mem, size_t bytes);

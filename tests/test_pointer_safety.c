@@ -1,5 +1,6 @@
 #include "test_framework.h"
 #include "../src/memoman.h"
+#include "memoman_test_internal.h"
 
 #include <stdint.h>
 
@@ -73,12 +74,41 @@ static int test_realloc_rejects_interior_pointer(void) {
   return 1;
 }
 
+static int test_free_rejects_forged_header_pointer(void) {
+  size_t total_bytes = mm_size() + mm_pool_overhead() + mm_block_size_min();
+  uint8_t* backing = malloc(total_bytes);
+  ASSERT_NOT_NULL(backing);
+
+  tlsf_t alloc = mm_create_with_pool(backing, total_bytes);
+  ASSERT_NOT_NULL(alloc);
+
+  size_t size = mm_block_size_min();
+  void* p = (mm_malloc)(alloc, size);
+  ASSERT_NOT_NULL(p);
+  ASSERT_NULL((mm_malloc)(alloc, size));
+
+  char* interior = (char*)p + (2 * ALIGNMENT);
+  tlsf_block_t* fake_block = (tlsf_block_t*)(interior - BLOCK_HEADER_OVERHEAD);
+  fake_block->size = TLSF_PREV_FREE | TLSF_MIN_BLOCK_SIZE;
+  tlsf_block_t** prev_ptr = (tlsf_block_t**)((char*)fake_block - sizeof(tlsf_block_t*));
+  *prev_ptr = NULL;
+
+  (mm_free)(alloc, interior);
+  ASSERT_NULL((mm_malloc)(alloc, size));
+
+  (mm_free)(alloc, p);
+  ASSERT((mm_validate)(alloc));
+  free(backing);
+  return 1;
+}
+
 int main(void) {
   TEST_SUITE_BEGIN("pointer_safety");
   RUN_TEST(test_free_ignores_non_owned_pointer);
   RUN_TEST(test_realloc_rejects_non_owned_pointer);
   RUN_TEST(test_free_rejects_interior_pointer);
   RUN_TEST(test_realloc_rejects_interior_pointer);
+  RUN_TEST(test_free_rejects_forged_header_pointer);
   TEST_SUITE_END();
   TEST_MAIN_END();
 }

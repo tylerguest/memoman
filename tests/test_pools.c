@@ -33,6 +33,32 @@ static int test_allocation_across_pools(void) {
   return 1;
 }
 
+static int test_add_pool_aligns_end(void) {
+  uint8_t backing[64 * 1024] __attribute__((aligned(16)));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
+  ASSERT_NOT_NULL(alloc);
+
+  uint8_t pool2[8193] __attribute__((aligned(16)));
+  ASSERT_NOT_NULL(mm_add_pool(alloc, pool2, sizeof(pool2)));
+  ASSERT((mm_validate)(alloc));
+  return 1;
+}
+
+static int test_add_pool_rejects_overlap(void) {
+  uint8_t backing[64 * 1024] __attribute__((aligned(16)));
+  tlsf_t alloc = mm_create_with_pool(backing, sizeof(backing));
+  ASSERT_NOT_NULL(alloc);
+
+  size_t offset = mm_size() + 1024;
+  size_t align = mm_align_size();
+  offset = (offset + (align - 1)) & ~(align - 1);
+
+  pool_t overlap = mm_add_pool(alloc, backing + offset, 4096);
+  ASSERT_NULL(overlap);
+  ASSERT((mm_validate)(alloc));
+  return 1;
+}
+
 int main(void) {
   /* 
    * Note: These tests use stack-allocated pools and do not use the 
@@ -41,6 +67,8 @@ int main(void) {
   printf("\n" COLOR_BOLD "=== Discontiguous Pools ===" COLOR_RESET "\n");
   
   RUN_TEST(test_allocation_across_pools);
+  RUN_TEST(test_add_pool_aligns_end);
+  RUN_TEST(test_add_pool_rejects_overlap);
   
   TEST_MAIN_END();
 }

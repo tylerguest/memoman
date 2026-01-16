@@ -115,6 +115,8 @@ typedef void (*mm_walker)(void* ptr, size_t size, int used, void* user);
 void mm_walk_pool(pool_t pool, mm_walker walker, void* user);
 int mm_validate(tlsf_t alloc);
 int mm_validate_pool(pool_t pool);
+int mm_check(tlsf_t alloc);      /* TLSF-style: returns nonzero on failure */
+int mm_check_pool(pool_t pool);  /* TLSF-style: returns nonzero on failure */
 
 /* Memoman extensions (TLSF does not define these). */
 tlsf_t mm_init_in_place(void* mem, size_t bytes);

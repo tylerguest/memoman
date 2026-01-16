@@ -82,14 +82,27 @@ static int test_detects_prev_free_inconsistency(void) {
   return 1;
 }
 
+static tlsf_block_t* find_epilogue(pool_t pool) {
+  tlsf_block_t* block = (tlsf_block_t*)pool;
+  size_t max_steps = (mm_block_size_max() / mm_align_size()) + 4;
+
+  for (size_t i = 0; i < max_steps; i++) {
+    size_t sz = block->size & TLSF_SIZE_MASK;
+    if (sz == 0) return block;
+    block = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
+  }
+
+  return NULL;
+}
+
 static int test_detects_epilogue_corruption(void) {
   uint8_t pool1[64 * 1024] __attribute__((aligned(16)));
   uint8_t pool2[64 * 1024] __attribute__((aligned(16)));
   pool_t p2 = NULL;
   tlsf_t alloc = make_two_pool_allocator(pool1, sizeof(pool1), pool2, sizeof(pool2), &p2);
 
-  mm_pool_desc_t* desc = (mm_pool_desc_t*)p2;
-  tlsf_block_t* epilogue = (tlsf_block_t*)(desc->end - BLOCK_HEADER_OVERHEAD);
+  tlsf_block_t* epilogue = find_epilogue(p2);
+  ASSERT_NOT_NULL(epilogue);
 
   /* Force a wrong prev_free state. */
   epilogue->size &= ~TLSF_PREV_FREE;

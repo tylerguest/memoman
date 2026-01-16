@@ -4,7 +4,8 @@
 #include <stdint.h>
 
 typedef struct {
-  mm_pool_desc_t* desc;
+  tlsf_t alloc;
+  pool_t pool;
   size_t blocks;
   size_t used_blocks;
   size_t free_blocks;
@@ -22,7 +23,7 @@ static void count_blocks(void* ptr, size_t size, int used, void* user) {
 
   if (!ptr) { st->ok = 0; return; }
   if (((uintptr_t)ptr % ALIGNMENT) != 0) { st->ok = 0; return; }
-  if (!(((uintptr_t)ptr >= (uintptr_t)st->desc->start) && ((uintptr_t)ptr < (uintptr_t)st->desc->end))) { st->ok = 0; return; }
+  if (mm_get_pool_for_ptr(st->alloc, ptr) != st->pool) { st->ok = 0; return; }
 }
 
 static int test_validate_pool_smoke(void) {
@@ -77,7 +78,8 @@ static int test_walk_pool_counts(void) {
   ASSERT_NOT_NULL(b);
 
   walk_stats_t st0 = {0};
-  st0.desc = (mm_pool_desc_t*)p0;
+  st0.alloc = alloc;
+  st0.pool = p0;
   st0.ok = 1;
   mm_walk_pool(p0, count_blocks, &st0);
   ASSERT(st0.ok);
@@ -85,7 +87,8 @@ static int test_walk_pool_counts(void) {
   ASSERT_GT(st0.used_blocks, 0);
 
   walk_stats_t st2 = {0};
-  st2.desc = (mm_pool_desc_t*)p2;
+  st2.alloc = alloc;
+  st2.pool = p2;
   st2.ok = 1;
   mm_walk_pool(p2, count_blocks, &st2);
   ASSERT(st2.ok);
