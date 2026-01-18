@@ -5,7 +5,8 @@ SRC = src/memoman.c
 TEST_DIR = tests
 BIN_DIR = tests/bin
 EXTRAS_DIR = extras
-HIST_BIN = $(EXTRAS_DIR)/latency_histogram
+EXTRAS_BIN_DIR = bin
+HIST_BIN = $(EXTRAS_BIN_DIR)/latency_histogram
 
 # Heavy/long-running tests should not run under `make run` by default.
 TEST_SRCS = $(filter-out $(TEST_DIR)/test_soak.c,$(wildcard $(TEST_DIR)/*.c))
@@ -70,9 +71,11 @@ extras: $(HIST_BIN)
 
 ifeq ($(wildcard $(CONTE_TLSF_SRC)),)
 $(HIST_BIN): $(EXTRAS_DIR)/latency_histogram.c $(SRC)
+	@mkdir -p $(EXTRAS_BIN_DIR)
 	$(CC) $(BASE_FLAGS) -O3 -flto -DNDEBUG -o $(HIST_BIN) $(EXTRAS_DIR)/latency_histogram.c $(SRC)
 else
 $(HIST_BIN): $(EXTRAS_DIR)/latency_histogram.c $(SRC) $(CONTE_TLSF_SRC)
+	@mkdir -p $(EXTRAS_BIN_DIR)
 	$(CC) $(BASE_FLAGS) -O3 -flto -DNDEBUG -DMM_HIST_HAVE_CONTE_TLSF=1 -Iexamples/matt_conte -o $(HIST_BIN) $(EXTRAS_DIR)/latency_histogram.c $(SRC) $(CONTE_TLSF_SRC)
 endif
 
