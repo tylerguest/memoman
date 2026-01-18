@@ -5,7 +5,7 @@ SRC = src/memoman.c
 TEST_DIR = tests
 BIN_DIR = tests/bin
 EXTRAS_DIR = extras
-EXTRAS_BIN_DIR = bin
+EXTRAS_BIN_DIR = $(EXTRAS_DIR)/bin
 HIST_BIN = $(EXTRAS_BIN_DIR)/latency_histogram
 
 # Heavy/long-running tests should not run under `make run` by default.

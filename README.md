@@ -43,7 +43,7 @@ make benchmark              # optimized build (for benchmark suite)
 make demo                   # build demo binary
 ./demo
 make extras                 # build extras (latency histogram demo)
-./bin/latency_histogram
+./extras/bin/latency_histogram
 ```
 
 Additional soak/benchmark targets are available (see `Makefile`). Some compare targets require a local checkout of
