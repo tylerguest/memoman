@@ -27,6 +27,16 @@ This repo uses `make` targets plus a few environment variables (mostly for the s
 - `./demo`  
   Runs a small smoke demo (pools + memalign + realloc).
 
+## Extras
+
+- `make extras`
+  Builds `./extras/latency_histogram` (mixed-size alloc/free latency histogram).
+
+- `./extras/latency_histogram`
+  Runs the latency histogram demo (frame loop, live updates every 250ms).
+  Override sample count with `MM_HIST_SAMPLES` (0 = infinite) and report interval with `MM_HIST_REPORT_MS`.
+  Frame tuning: `MM_HIST_FRAME_BYTES`, `MM_HIST_BURST_MIN`, `MM_HIST_BURST_MAX`, `MM_HIST_KEEP_MIN`, `MM_HIST_KEEP_MAX`.
+
 ## Soak / stress testing
 
 The soak harness lives in `tests/test_soak.c` and prints live stats.

@@ -4,6 +4,8 @@ CFLAGS = $(BASE_FLAGS) -g -DDEBUG_OUTPUT
 SRC = src/memoman.c
 TEST_DIR = tests
 BIN_DIR = tests/bin
+EXTRAS_DIR = extras
+HIST_BIN = $(EXTRAS_DIR)/latency_histogram
 
 # Heavy/long-running tests should not run under `make run` by default.
 TEST_SRCS = $(filter-out $(TEST_DIR)/test_soak.c,$(wildcard $(TEST_DIR)/*.c))
@@ -14,6 +16,7 @@ SOAK_CONTE_BIN = $(BIN_DIR)/test_soak_conte
 
 .PHONY: all clean debug benchmark run
 .PHONY: demo
+.PHONY: extras
 .PHONY: soak soak_debug
 .PHONY: soak_30
 .PHONY: soak_rt_30
@@ -62,6 +65,16 @@ benchmark: clean $(TEST_BINS)
 
 demo: demo.c $(SRC)
 	$(CC) $(BASE_FLAGS) -O2 -DNDEBUG -o demo demo.c $(SRC)
+
+extras: $(HIST_BIN)
+
+ifeq ($(wildcard $(CONTE_TLSF_SRC)),)
+$(HIST_BIN): $(EXTRAS_DIR)/latency_histogram.c $(SRC)
+	$(CC) $(BASE_FLAGS) -O3 -flto -DNDEBUG -o $(HIST_BIN) $(EXTRAS_DIR)/latency_histogram.c $(SRC)
+else
+$(HIST_BIN): $(EXTRAS_DIR)/latency_histogram.c $(SRC) $(CONTE_TLSF_SRC)
+	$(CC) $(BASE_FLAGS) -O3 -flto -DNDEBUG -DMM_HIST_HAVE_CONTE_TLSF=1 -Iexamples/matt_conte -o $(HIST_BIN) $(EXTRAS_DIR)/latency_histogram.c $(SRC) $(CONTE_TLSF_SRC)
+endif
 
 soak: CFLAGS = $(BASE_FLAGS) -O2 -DNDEBUG
 soak: clean $(SOAK_BIN)

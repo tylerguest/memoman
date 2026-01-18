@@ -42,6 +42,8 @@ make run DEBUG=1 TIMING=1   # full output + timing
 make benchmark              # optimized build (for benchmark suite)
 make demo                   # build demo binary
 ./demo
+make extras                 # build extras (latency histogram demo)
+./extras/latency_histogram
 ```
 
 Additional soak/benchmark targets are available (see `Makefile`). Some compare targets require a local checkout of
