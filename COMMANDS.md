@@ -83,6 +83,10 @@ Seed/steps mode tuning (ignored when `MM_SOAK_SECONDS` is set):
 - `MM_SOAK_SLOTS=<N>` number of live “slots” tracked by the generator
 - `MM_SOAK_VALIDATE_SHIFT=<N>` validate every `2^N` ops
 - `MM_SOAK_PROGRESS_EVERY=<N>` progress print frequency (in seeds)
+- `MM_SOAK_STRESS=1` multiplies soak iterations for heavier runs
+- `MM_SOAK_MEMALIGN_ITERS=<N>` overrides memalign torture iterations
+- `MM_SOAK_MEMALIGN_CHURN_ITERS=<N>` overrides memalign churn iterations
+- `MM_SOAK_MEMALIGN_CHURN_SLOTS=<N>` overrides memalign churn slots (max 1024)
 
 RT-ish tuning:
 - `MM_SOAK_RT=1` enables the RT-ish setup prints and attempts

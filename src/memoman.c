@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
 #include "memoman.h"
 
 /* Internal control structure type. The public API uses opaque `tlsf_t` handles. */
@@ -13,17 +14,17 @@ typedef struct mm_allocator_t mm_allocator_t;
 /*
 ** memoman
 **
-** A pool-based TLSF allocator targeting TLSF 3.1 semantics:
+** Pool-based TLSF allocator targeting TLSF 3.1 semantics:
 ** - O(1) hot-path operations (bounded by FL/SL bitmaps).
 ** - No OS allocation APIs in core (caller provides memory pools).
 ** - Free-list pointers live in the user payload when a block is free.
 */
 
 /*
-** Architecture-specific bit manipulation routines.
+** Bitmap helpers.
 **
-** TLSF achieves O(1) cost for malloc and free operations by limiting the search for a free block to a bounded set
-** of lists and using bitmaps for O(1) lookup of the next non-empty list.
+** TLSF achieves O(1) cost by limiting search to bounded lists and using
+** bitmaps to find the next non-empty bucket.
 */
 
 /* C99-compatible compile-time assertions. */
@@ -53,9 +54,8 @@ typedef struct tlsf_block_t {
 ** Pool tracking.
 **
 ** For TLSF-style tooling (`mm_walk_pool`, `mm_validate_pool`, `mm_remove_pool`) we must be able to operate on a
-** specific pool without ever walking across pools.
+** specific pool without walking across pools.
 */
-/* Pool tracking (bounded, O(1) scans). */
 #define MM_MAX_POOLS 32
 
 typedef struct mm_pool_desc_t {
@@ -81,8 +81,8 @@ typedef struct mm_pool_desc_t {
 #define ALIGNMENT         sizeof(size_t)
 
 /* Derived minimum payload required for a free block (TLSF 3.1 semantics):
-** - next_free/prev_free stored at payload start (2 pointers)
-** - next block's prev_phys stored in this payload (1 pointer)
+** - `next_free`/`prev_free` stored at payload start (2 pointers).
+** - Next block's `prev_phys` stored at payload end (1 pointer).
 */
 #define MM_FREELIST_LINKS_BYTES (2 * sizeof(void*))
 #define MM_PREV_PHYS_FOOTER_BYTES (sizeof(void*))
@@ -189,18 +189,43 @@ static inline int fls_sizet(size_t word) {
 #endif
 }
 
-static inline size_t block_size(tlsf_block_t* block) { return block->size & TLSF_SIZE_MASK; }
-static inline int block_is_free(tlsf_block_t* block) { return (block->size & TLSF_BLOCK_FREE) != 0; }
-static inline int block_is_prev_free(tlsf_block_t* block) { return (block->size & TLSF_PREV_FREE) != 0; }
-static inline void block_set_size(tlsf_block_t* block, size_t size) { size_t flags = block->size & ~TLSF_SIZE_MASK; block->size = size | flags; }
-static inline void block_set_free(tlsf_block_t* block) { block->size |= TLSF_BLOCK_FREE; }
-static inline void block_set_used(tlsf_block_t* block) { block->size &= ~TLSF_BLOCK_FREE; }
-static inline void block_set_prev_free(tlsf_block_t* block) { block->size |= TLSF_PREV_FREE; }
-static inline void block_set_prev_used(tlsf_block_t* block) { block->size &= ~TLSF_PREV_FREE; }
+static inline size_t block_size(tlsf_block_t* block) {
+  return block->size & TLSF_SIZE_MASK;
+}
+
+static inline int block_is_free(tlsf_block_t* block) {
+  return (block->size & TLSF_BLOCK_FREE) != 0;
+}
+
+static inline int block_is_prev_free(tlsf_block_t* block) {
+  return (block->size & TLSF_PREV_FREE) != 0;
+}
+
+static inline void block_set_size(tlsf_block_t* block, size_t size) {
+  size_t flags = block->size & ~TLSF_SIZE_MASK;
+  block->size = size | flags;
+}
+
+static inline void block_set_free(tlsf_block_t* block) {
+  block->size |= TLSF_BLOCK_FREE;
+}
+
+static inline void block_set_used(tlsf_block_t* block) {
+  block->size &= ~TLSF_BLOCK_FREE;
+}
+
+static inline void block_set_prev_free(tlsf_block_t* block) {
+  block->size |= TLSF_PREV_FREE;
+}
+
+static inline void block_set_prev_used(tlsf_block_t* block) {
+  block->size &= ~TLSF_PREV_FREE;
+}
 
 static inline tlsf_block_t* block_prev(tlsf_block_t* block) {
   return *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*)));
 }
+
 static inline void block_set_prev(tlsf_block_t* block, tlsf_block_t* prev) {
   *((tlsf_block_t**)((char*)block - sizeof(tlsf_block_t*))) = prev;
 }
@@ -290,13 +315,15 @@ static void remove_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
 static void insert_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
   int fl, sl;
   mapping_insert(block_size(block), &fl, &sl);
-    
+
   tlsf_block_t* head = ctrl->blocks[fl][sl];
   block->next_free = head;
   block->prev_free = NULL;
 
-  if (head) { head->prev_free = block; }
-    
+  if (head) {
+    head->prev_free = block;
+  }
+
   ctrl->blocks[fl][sl] = block;
 
   /* Update bitmaps. */
@@ -305,8 +332,14 @@ static void insert_free_block(mm_allocator_t* ctrl, tlsf_block_t* block) {
   ctrl->current_free_size += block_size(block);
 }
 
-static inline void* block_to_user(tlsf_block_t* block) { return (void*)((char*)block + BLOCK_START_OFFSET); }
-static inline tlsf_block_t* user_to_block(void* ptr) { return (tlsf_block_t*)((char*)ptr - BLOCK_START_OFFSET); }
+static inline void* block_to_user(tlsf_block_t* block) {
+  return (void*)((char*)block + BLOCK_START_OFFSET);
+}
+
+static inline tlsf_block_t* user_to_block(void* ptr) {
+  return (tlsf_block_t*)((char*)ptr - BLOCK_START_OFFSET);
+}
+
 
 /*
 ** Pool handle helpers.
@@ -333,17 +366,22 @@ static mm_pool_desc_t* pool_desc_for_block(mm_allocator_t* ctrl, const tlsf_bloc
 }
 
 
-void mm_get_mapping_indices(size_t size, int* fl, int* sl) { mapping_insert(size, fl, sl); }
-void mm_get_mapping_search_indices(size_t size, int* fl, int* sl) { mapping_search(size, fl, sl); }
+void mm_get_mapping_indices(size_t size, int* fl, int* sl) {
+  mapping_insert(size, fl, sl);
+}
 
+void mm_get_mapping_search_indices(size_t size, int* fl, int* sl) {
+  mapping_search(size, fl, sl);
+}
 
 static inline tlsf_block_t* block_next_safe(mm_allocator_t* ctrl, tlsf_block_t* block) {
+
   size_t sz = block_size(block);
   if (sz == 0) return NULL; /* epilogue */
   if (sz > SIZE_MAX - BLOCK_HEADER_OVERHEAD) return NULL;
 
   tlsf_block_t* next = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + sz);
-  /* With discontiguous pools, we rely on sentinel blocks (size 0) to stop iteration. */
+  /* With discontiguous pools, rely on the size-0 epilogue to stop iteration. */
   (void)ctrl;
   return next;
 }
@@ -364,6 +402,7 @@ static inline int mm_block_header_sane(const mm_pool_desc_t* desc, const tlsf_bl
   if (desc->bytes == 0) return 0;
   if (desc->end <= desc->start) return 0;
   if (!mm_block_ptr_in_pool(desc, block)) return 0;
+
   size_t sz = block_size((tlsf_block_t*)block);
   if (sz < TLSF_MIN_BLOCK_SIZE) return 0;
   if ((sz % ALIGNMENT) != 0) return 0;
@@ -509,7 +548,6 @@ static inline void block_mark_as_free(mm_allocator_t* ctrl, tlsf_block_t* block)
   }
 }
 
-
 static inline tlsf_block_t* split_block(mm_allocator_t* ctrl, tlsf_block_t* block, size_t size) {
   size_t block_total_size = block_size(block);
   size_t min_split_size = size + BLOCK_HEADER_OVERHEAD + TLSF_MIN_BLOCK_SIZE;
@@ -522,11 +560,11 @@ static inline tlsf_block_t* split_block(mm_allocator_t* ctrl, tlsf_block_t* bloc
   tlsf_block_t* remainder = (tlsf_block_t*)((char*)block + BLOCK_HEADER_OVERHEAD + size);
   block_set_size(remainder, remainder_size);
   block_set_free(remainder);
-  block_set_prev_used(remainder); /* The block before remainder is now used. */
+  block_set_prev_used(remainder); /* Block before remainder is now used. */
 
   tlsf_block_t* next = block_next_safe(ctrl, remainder);
   if (next) {
-    block_set_prev_free(next); /* The block before next is now free (remainder). */
+    block_set_prev_free(next); /* Block before next is now free (remainder). */
     block_set_prev(next, remainder);
   }
   return remainder;
@@ -538,7 +576,12 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
 
   if (block_is_prev_free(block)) {
     tlsf_block_t* prev = block_prev(block);
-    if (!mm_block_ptr_in_pool(pool_desc, prev) || !mm_block_header_sane(pool_desc, prev) || !block_is_free(prev) || (block_next_safe(ctrl, prev) != block)) {
+    int prev_valid = mm_block_ptr_in_pool(pool_desc, prev) &&
+      mm_block_header_sane(pool_desc, prev) &&
+      block_is_free(prev) &&
+      (block_next_safe(ctrl, prev) == block);
+
+    if (!prev_valid) {
       block_set_prev_used(block);
     } else {
       remove_free_block(ctrl, prev);
@@ -556,7 +599,11 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
 
   tlsf_block_t* next = block_next_safe(ctrl, block);
   if (next && mm_block_ptr_in_pool(pool_desc, next) && block_is_free(next)) {
-    if (mm_block_header_sane(pool_desc, next) && block_is_prev_free(next) && block_prev(next) == block) {
+    int next_valid = mm_block_header_sane(pool_desc, next) &&
+      block_is_prev_free(next) &&
+      block_prev(next) == block;
+
+    if (next_valid) {
       remove_free_block(ctrl, next);
       size_t combined = block_size(block) + BLOCK_HEADER_OVERHEAD + block_size(next);
       block_set_size(block, combined);
@@ -568,7 +615,6 @@ static inline tlsf_block_t* coalesce(mm_allocator_t* ctrl, tlsf_block_t* block) 
       }
     }
   }
-
   return block;
 }
 
@@ -582,7 +628,11 @@ int mm_validate(tlsf_t tlsf) {
   mm_allocator_t* ctrl = (mm_allocator_t*)tlsf;
   if (!ctrl) return 0;
 
-  #define CHECK(cond, msg) do { if (!(cond)) { return 0; } } while(0)
+#define CHECK(cond, msg) do { \
+  if (!(cond)) { \
+    return 0; \
+  } \
+} while (0)
 
   /* 1. Per-pool physical validation. */
   size_t pools_bytes = 0;
@@ -643,8 +693,11 @@ int mm_validate(tlsf_t tlsf) {
 
     for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
       CHECK((ctrl->sl_bitmap[fl] & ~sl_mask) == 0, "SL bitmap has out-of-range bits");
-      if (ctrl->sl_bitmap[fl]) CHECK((ctrl->fl_bitmap & (1u << fl)) != 0, "FL bitmap cleared but SL bitmap nonzero");
-      else CHECK((ctrl->fl_bitmap & (1u << fl)) == 0, "FL bitmap set but SL bitmap zero");
+      if (ctrl->sl_bitmap[fl]) {
+        CHECK((ctrl->fl_bitmap & (1u << fl)) != 0, "FL bitmap cleared but SL bitmap nonzero");
+      } else {
+        CHECK((ctrl->fl_bitmap & (1u << fl)) == 0, "FL bitmap set but SL bitmap zero");
+      }
     }
   }
 
@@ -657,51 +710,53 @@ int mm_validate(tlsf_t tlsf) {
 
   for (int fl = 0; fl < TLSF_FLI_MAX; fl++) {
     for (int sl = 0; sl < TLSF_SLI_COUNT; sl++) {
-      tlsf_block_t* block = ctrl->blocks[fl][sl];
-      
-      /* Bitmap Consistency */
-      int has_bit = (ctrl->sl_bitmap[fl] & (1U << sl)) != 0;
-      if (block) CHECK(has_bit, "Bitmap cleared but list not empty");
-      else {
-        CHECK(!has_bit, "Bitmap set but list empty");
-        continue;
-      }
+       tlsf_block_t* block = ctrl->blocks[fl][sl];
 
-      tlsf_block_t* walk = block;
-      tlsf_block_t* list_prev = NULL;
-      size_t count = 0;
-      
-      while (walk) {
-        CHECK(count++ < max_list_nodes, "Infinite loop detected in free list");
-        CHECK(block_is_free(walk), "Used block found in free list");
-        CHECK(walk->prev_free == list_prev, "Free list prev pointer broken");
-        CHECK((block_size(walk) % ALIGNMENT) == 0, "Free block size unaligned");
-        CHECK(block_size(walk) >= TLSF_MIN_BLOCK_SIZE, "Free block too small");
-        CHECK(walk->next_free != walk, "Self-loop detected in free list");
+       /* Bitmap consistency. */
+       int has_bit = (ctrl->sl_bitmap[fl] & (1U << sl)) != 0;
+       if (block) {
+         CHECK(has_bit, "Bitmap cleared but list not empty");
+       } else {
+         CHECK(!has_bit, "Bitmap set but list empty");
+         continue;
+       }
 
-        mm_pool_desc_t* desc = pool_desc_for_block(ctrl, walk);
-        CHECK(desc != NULL, "Free list block not contained by any pool");
-        CHECK((uintptr_t)walk >= (uintptr_t)desc->start, "Free list block outside pool start");
-        CHECK((uintptr_t)walk < (uintptr_t)desc->end, "Free list block outside pool end");
+       tlsf_block_t* walk = block;
+       tlsf_block_t* list_prev = NULL;
+       size_t count = 0;
 
-        /* Prev-physical linkage: the next block must mark prev as free and point back to us. */
-        tlsf_block_t* phys_next = block_next_safe(ctrl, walk);
-        CHECK(phys_next != NULL, "Free block missing next physical");
-        CHECK(block_is_prev_free(phys_next), "Next block missing PREV_FREE");
-        CHECK(block_prev(phys_next) == walk, "Next block prev pointer mismatch");
-        
-        /* Size Mapping Check */
-        int mapped_fl, mapped_sl;
-        mapping_insert(block_size(walk), &mapped_fl, &mapped_sl);
-        CHECK(mapped_fl == fl && mapped_sl == sl, "Block in wrong free list bucket");
+       while (walk) {
+         CHECK(count++ < max_list_nodes, "Infinite loop detected in free list");
+         CHECK(block_is_free(walk), "Used block found in free list");
+         CHECK(walk->prev_free == list_prev, "Free list prev pointer broken");
+         CHECK((block_size(walk) % ALIGNMENT) == 0, "Free block size unaligned");
+         CHECK(block_size(walk) >= TLSF_MIN_BLOCK_SIZE, "Free block too small");
+         CHECK(walk->next_free != walk, "Self-loop detected in free list");
 
-        list_counts[fl][sl]++;
-        free_list_blocks++;
-        free_list_bytes += block_size(walk);
+         mm_pool_desc_t* desc = pool_desc_for_block(ctrl, walk);
+         CHECK(desc != NULL, "Free list block not contained by any pool");
+         CHECK((uintptr_t)walk >= (uintptr_t)desc->start, "Free list block outside pool start");
+         CHECK((uintptr_t)walk < (uintptr_t)desc->end, "Free list block outside pool end");
 
-        list_prev = walk;
-        walk = walk->next_free;
-      }
+         /* Prev-physical linkage: next block must mark prev as free and point back. */
+         tlsf_block_t* phys_next = block_next_safe(ctrl, walk);
+         CHECK(phys_next != NULL, "Free block missing next physical");
+         CHECK(block_is_prev_free(phys_next), "Next block missing PREV_FREE");
+         CHECK(block_prev(phys_next) == walk, "Next block prev pointer mismatch");
+
+         /* Size mapping check. */
+         int mapped_fl, mapped_sl;
+         mapping_insert(block_size(walk), &mapped_fl, &mapped_sl);
+         CHECK(mapped_fl == fl && mapped_sl == sl, "Block in wrong free list bucket");
+
+         list_counts[fl][sl]++;
+         free_list_blocks++;
+         free_list_bytes += block_size(walk);
+
+         list_prev = walk;
+         walk = walk->next_free;
+       }
+
     }
   }
 
@@ -826,7 +881,7 @@ static void mm_check_integrity(mm_allocator_t* ctrl) {
 tlsf_t mm_create(void* mem) {
   /* Control-only create (TLSF-style): does not implicitly consume remaining bytes as a pool. */
   if (!mem) return NULL;
-  /* Ensure provided memory is aligned */
+  /* Ensure provided memory is aligned. */
   if ((uintptr_t)mem % ALIGNMENT != 0) return NULL;
 
   mm_allocator_t* allocator = (mm_allocator_t*)mem;
@@ -836,7 +891,7 @@ tlsf_t mm_create(void* mem) {
 }
 
 tlsf_t mm_create_with_pool(void* mem, size_t bytes) {
-  /* Overhead: Allocator + Alignment Padding + Min Block + Epilogue */
+  /* Overhead: allocator + alignment padding + min block + epilogue. */
   size_t overhead = sizeof(mm_allocator_t) + ALIGNMENT + BLOCK_HEADER_OVERHEAD + BLOCK_HEADER_OVERHEAD;
   if (bytes < overhead + TLSF_MIN_BLOCK_SIZE) return NULL;
 
@@ -877,7 +932,9 @@ int mm_reset(tlsf_t tlsf) {
   /* Refuse to reset if any live allocation exists in any pool. */
   for (size_t i = 0; i < MM_MAX_POOLS; i++) {
     if (!allocator->pools[i].active) continue;
-    if (allocator->pools[i].live_allocations != 0) return 0;
+    if (allocator->pools[i].live_allocations != 0) {
+      return 0;
+    }
   }
 
   allocator->fl_bitmap = 0;
@@ -953,7 +1010,7 @@ pool_t mm_add_pool(tlsf_t tlsf, void* mem, size_t bytes) {
   char* pool_start = (char*)mem;
   size_t aligned_bytes = bytes;
 
-  /* Check if alignment ate too much */
+  /* Ensure alignment does not eat too much space. */
   if (aligned_bytes < overhead + TLSF_MIN_BLOCK_SIZE) return NULL;
 
   char* pool_end = pool_start + aligned_bytes;
@@ -963,7 +1020,9 @@ pool_t mm_add_pool(tlsf_t tlsf, void* mem, size_t bytes) {
   for (size_t i = 0; i < MM_MAX_POOLS; i++) {
     mm_pool_desc_t* p = &allocator->pools[i];
     if (!p->active) continue;
-    if (pool_start_addr < (uintptr_t)p->end && pool_end_addr > (uintptr_t)p->start) return NULL;
+    if (pool_start_addr < (uintptr_t)p->end && pool_end_addr > (uintptr_t)p->start) {
+      return NULL;
+    }
   }
 
   mm_pool_desc_t* desc = NULL;
@@ -982,7 +1041,7 @@ pool_t mm_add_pool(tlsf_t tlsf, void* mem, size_t bytes) {
   desc->active = 1;
   pool_registry_add(desc);
 
-  /* 1. Create Epilogue sentinel. */
+  /* 1. Create epilogue sentinel. */
   tlsf_block_t* epilogue = (tlsf_block_t*)(pool_end - BLOCK_HEADER_OVERHEAD);
   block_set_size(epilogue, 0);
   block_set_used(epilogue);
@@ -996,15 +1055,15 @@ pool_t mm_add_pool(tlsf_t tlsf, void* mem, size_t bytes) {
   */
   tlsf_block_t* block = (tlsf_block_t*)pool_start;
   size_t size = (size_t)((char*)epilogue - (char*)block - BLOCK_HEADER_OVERHEAD);
-  
+
   block_set_size(block, size);
   block_set_free(block);
   block_set_prev_used(block);
   block_set_prev(epilogue, block);
-  
+
   insert_free_block(allocator, block);
   allocator->total_pool_size += aligned_bytes;
-  
+
   return (pool_t)pool_start;
 }
 
@@ -1021,7 +1080,7 @@ void mm_remove_pool(tlsf_t tlsf, pool_t pool) {
   tlsf_block_t* epilogue = (tlsf_block_t*)(desc->end - BLOCK_HEADER_OVERHEAD);
 
   size_t max_steps = (desc->bytes / ALIGNMENT) + 2;
-  /* Preflight: refuse to remove if any used block exists (don't mutate state). */
+  /* Preflight: refuse to remove if any used block exists (do not mutate state). */
   for (size_t i = 0; i < max_steps; i++) {
     size_t sz = block_size(block);
     if (sz == 0) break;
@@ -1074,20 +1133,24 @@ void* mm_malloc(tlsf_t tlsf, size_t bytes) {
   remove_free_block_direct(ctrl, block, fl, sl);
   tlsf_block_t* remainder = split_block(ctrl, block, bytes);
   if (remainder) {
-    /* Coalesce remainder with next block if it is free */
+    /* Coalesce remainder with next block if it is free. */
     remainder = coalesce(ctrl, remainder);
     insert_free_block(ctrl, remainder);
   }
 
   block_set_used(block);
   tlsf_block_t* next = block_next_safe(ctrl, block);
-  if (next) block_set_prev_used(next);
+  if (next) {
+    block_set_prev_used(next);
+  }
 
   mm_pool_desc_t* pool_desc = pool_desc_for_block(ctrl, block);
 #ifdef MM_DEBUG
   assert(pool_desc && "allocation returned a block outside any pool");
 #endif
-  if (pool_desc) pool_desc->live_allocations++;
+  if (pool_desc) {
+    pool_desc->live_allocations++;
+  }
 
   mm_check_integrity(ctrl);
   return block_to_user(block);
@@ -1113,8 +1176,6 @@ void mm_free(tlsf_t tlsf, void* ptr) {
   }
 
   if (block_is_free(block)) {
-    /* Double free detected: do nothing, but optionally log for debug */
-    /* fprintf(stderr, "[Memoman] Warning: Double free detected for %p\n", ptr); */
 #ifdef MM_DEBUG
     if (MM_DEBUG_ABORT_ON_DOUBLE_FREE) {
       assert(!"mm_free: double free");
@@ -1126,11 +1187,13 @@ void mm_free(tlsf_t tlsf, void* ptr) {
 #ifdef MM_DEBUG
   assert(pool_desc && pool_desc->live_allocations > 0);
 #endif
-  if (pool_desc && pool_desc->live_allocations > 0) pool_desc->live_allocations--;
+  if (pool_desc && pool_desc->live_allocations > 0) {
+    pool_desc->live_allocations--;
+  }
 
   block_mark_as_free(ctrl, block);
   block = coalesce(ctrl, block);
-  /* Always insert the coalesced block into the free list */
+  /* Always insert the coalesced block into the free list. */
   insert_free_block(ctrl, block);
   mm_check_integrity(ctrl);
 }
@@ -1139,7 +1202,7 @@ static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
   if (!ctrl) return -1;
   mm_check_integrity(ctrl);
 
-  /* Handle Main Heap Blocks */
+  /* Handle main heap blocks. */
   {
     if ((uintptr_t)ptr % ALIGNMENT != 0) return -1;
 
@@ -1149,7 +1212,7 @@ static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
     if (size < TLSF_MIN_BLOCK_SIZE) size = TLSF_MIN_BLOCK_SIZE;
     size_t aligned_size = align_size(size);
 
-    /* Case 1: Shrink or Same Size */
+    /* Case 1: shrink or same size. */
     if (aligned_size <= current_size) {
       tlsf_block_t* remainder = split_block(ctrl, block, aligned_size);
       if (remainder) {
@@ -1161,16 +1224,16 @@ static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
       return 0;
     }
 
-    /* Case 2: Grow (Try to coalesce with next block) */
+    /* Case 2: grow (try to coalesce with next block). */
     tlsf_block_t* next = block_next_safe(ctrl, block);
     if (next && block_is_free(next)) {
       size_t next_size = block_size(next);
       size_t combined = current_size + BLOCK_HEADER_OVERHEAD + next_size;
-      
+
       if (combined >= aligned_size) {
         remove_free_block(ctrl, next);
         block_set_size(block, combined);
-        
+
         tlsf_block_t* next_next = block_next_safe(ctrl, block);
         if (next_next) {
           block_set_prev_used(next_next);
@@ -1186,15 +1249,18 @@ static int try_realloc_inplace(mm_allocator_t* ctrl, void* ptr, size_t size) {
         return 0;
       }
     }
-    return 1; /* Valid, but needs move */
-  } 
+    return 1; /* Valid, but needs move. */
+  }
   return -1;
 }
 
 void* mm_realloc(tlsf_t tlsf, void* ptr, size_t size) {
   mm_allocator_t* ctrl = (mm_allocator_t*)tlsf;
   if (!ptr) return mm_malloc(tlsf, size);
-  if (size == 0) { mm_free(tlsf, ptr); return NULL; }
+  if (size == 0) {
+    mm_free(tlsf, ptr);
+    return NULL;
+  }
 
 #ifdef MM_DEBUG
   if (!ctrl) return NULL;
@@ -1218,13 +1284,14 @@ void* mm_realloc(tlsf_t tlsf, void* ptr, size_t size) {
   }
 
   int status = try_realloc_inplace(ctrl, ptr, size);
-  
-  if (status == 0) return ptr; /* In-place success */
+
+  if (status == 0) return ptr; /* In-place success. */
   if (status == -1) {
     return NULL;
   }
 
-  /* Status 1: Needs move */
+  /* Status 1: needs move. */
+
   void* new_ptr = mm_malloc(tlsf, size);
   if (new_ptr) {
     size_t old_usable = block_size(block);
@@ -1240,12 +1307,12 @@ void* mm_memalign(tlsf_t tlsf, size_t align, size_t bytes) {
   if (align == 0 || (align & (align - 1)) != 0) return NULL; /* must be power of two */
   if (bytes == 0) return NULL;
 
-  /* If alignment is <= default alignment, regular malloc suffices */
+  /* If alignment is <= default alignment, regular malloc suffices. */
   if (align <= ALIGNMENT) return mm_malloc(tlsf, bytes);
 
   mm_check_integrity(ctrl);
 
-  /* Normalize requested size */
+  /* Normalize requested size. */
   size_t requested_size = (bytes < TLSF_MIN_BLOCK_SIZE) ? TLSF_MIN_BLOCK_SIZE : bytes;
   requested_size = align_size(requested_size);
 
@@ -1270,7 +1337,7 @@ void* mm_memalign(tlsf_t tlsf, size_t align, size_t bytes) {
   tlsf_block_t* block = search_suitable_block(ctrl, aligned_size, &fl, &sl);
   if (!block) return NULL;
 
-  /* Remove the chosen free block from free lists */
+  /* Remove the chosen free block from free lists. */
   remove_free_block_direct(ctrl, block, fl, sl);
 
   size_t orig_size = block_size(block);
@@ -1323,7 +1390,9 @@ void* mm_memalign(tlsf_t tlsf, size_t align, size_t bytes) {
   }
 
   tlsf_block_t* remainder = split_block(ctrl, aligned_block, requested_size);
-  if (remainder) insert_free_block(ctrl, remainder);
+  if (remainder) {
+    insert_free_block(ctrl, remainder);
+  }
 
   block_set_used(aligned_block);
   tlsf_block_t* next = block_next_safe(ctrl, aligned_block);
@@ -1335,7 +1404,9 @@ void* mm_memalign(tlsf_t tlsf, size_t align, size_t bytes) {
 #ifdef MM_DEBUG
   assert(pool_desc && "memalign returned a block outside any pool");
 #endif
-  if (pool_desc) pool_desc->live_allocations++;
+  if (pool_desc) {
+    pool_desc->live_allocations++;
+  }
 
   mm_check_integrity(ctrl);
   return block_to_user(aligned_block);
@@ -1347,9 +1418,17 @@ size_t mm_block_size(void* ptr) {
   return block_size(block);
 }
 
-size_t mm_size(void) { return sizeof(mm_allocator_t); }
-size_t mm_align_size(void) { return ALIGNMENT; }
-size_t mm_block_size_min(void) { return TLSF_MIN_BLOCK_SIZE; }
+size_t mm_size(void) {
+  return sizeof(mm_allocator_t);
+}
+
+size_t mm_align_size(void) {
+  return ALIGNMENT;
+}
+
+size_t mm_block_size_min(void) {
+  return TLSF_MIN_BLOCK_SIZE;
+}
 
 size_t mm_block_size_max(void) {
   /* Must be < BLOCK_SIZE_MAX and remain aligned after rounding. */

@@ -333,6 +333,19 @@ static unsigned soak_seconds(void) {
   return (unsigned)strtoul(env, NULL, 0);
 }
 
+static int soak_stress(void) {
+  const char* env = getenv("MM_SOAK_STRESS");
+  if (!env || !*env) return 0;
+  return atoi(env) != 0;
+}
+
+static size_t soak_iter_override(const char* env_name, size_t fallback) {
+  const char* env = getenv(env_name);
+  if (!env || !*env) return fallback;
+  size_t v = (size_t)strtoull(env, NULL, 0);
+  return v ? v : fallback;
+}
+
 static unsigned soak_report_ms(void) {
   const char* env = getenv("MM_SOAK_REPORT_MS");
   if (!env || !*env) return 1000;
@@ -561,12 +574,14 @@ static void print_stats_line(
 static int soak_memalign_torture(uint32_t seed) {
   uint32_t rng = seed;
   const soak_alloc_api_t* api = soak_backend();
-  const size_t iters =
+  size_t iters =
 #ifdef MM_DEBUG
     2000;
 #else
     20000;
 #endif
+  if (soak_stress()) iters *= 5;
+  iters = soak_iter_override("MM_SOAK_MEMALIGN_ITERS", iters);
   const int verbose = soak_verbose();
 
   if (verbose) {
@@ -598,6 +613,81 @@ static int soak_memalign_torture(uint32_t seed) {
     }
   }
   return 1;
+}
+
+static int soak_memalign_churn(uint32_t seed) {
+  uint32_t rng = seed ^ 0xC001D00Du;
+  const soak_alloc_api_t* api = soak_backend();
+  const int verbose = soak_verbose();
+  size_t slots_n = 256;
+  size_t iters =
+#ifdef MM_DEBUG
+    2000;
+#else
+    8000;
+#endif
+  if (soak_stress()) {
+    iters *= 4;
+    slots_n = 512;
+  }
+  iters = soak_iter_override("MM_SOAK_MEMALIGN_CHURN_ITERS", iters);
+  slots_n = soak_iter_override("MM_SOAK_MEMALIGN_CHURN_SLOTS", slots_n);
+  if (slots_n == 0) slots_n = 1;
+  if (slots_n > 1024) slots_n = 1024;
+
+  void* slots[1024] = {0};
+  size_t reqs[1024] = {0};
+  size_t aligns[1024] = {0};
+
+  if (verbose) {
+    printf("soak: phase=memalign_churn backend=%s seed=0x%08x iters=%zu\n", api->name, seed, iters);
+  }
+
+  for (size_t i = 0; i < iters; i++) {
+    size_t idx = (size_t)(xorshift32(&rng) % (uint32_t)slots_n);
+    if (slots[idx]) {
+      if (!check_pattern(slots[idx], reqs[idx], (uint8_t)(idx & 0xff))) {
+        print_repro("memalign_churn", seed, 0, i, OP_MEMALIGN, idx, reqs[idx], aligns[idx]);
+        api->free_fn(slots[idx]);
+        return 0;
+      }
+      api->free_fn(slots[idx]);
+      slots[idx] = NULL;
+      reqs[idx] = 0;
+      aligns[idx] = 0;
+      continue;
+    }
+
+    size_t req = pick_size(xorshift32(&rng));
+    size_t a = pick_align(xorshift32(&rng));
+    if (req == 0) req = 1;
+    void* p = api->memalign_fn(a, req);
+    if (!p) continue;
+
+    size_t bs = api->block_size_fn ? api->block_size_fn(p) : 0;
+    if (!ptr_aligned(p, a) || (bs && bs < req)) {
+      print_repro("memalign_churn", seed, 0, i, OP_MEMALIGN, idx, req, a);
+      api->free_fn(p);
+      return 0;
+    }
+
+    fill_pattern(p, req, (uint8_t)(idx & 0xff));
+    slots[idx] = p;
+    reqs[idx] = req;
+    aligns[idx] = a;
+
+    if (((i + 1) & 511u) == 0) {
+      if (!api->validate_fn()) {
+        print_repro("memalign_churn", seed, 0, i, OP_MEMALIGN, idx, req, a);
+        return 0;
+      }
+    }
+  }
+
+  for (size_t i = 0; i < slots_n; i++) {
+    if (slots[i]) api->free_fn(slots[i]);
+  }
+  return api->validate_fn();
 }
 
 static int soak_pool_add_remove(uint32_t seed) {
@@ -1067,6 +1157,7 @@ static int soak_run_backend_time(
   ASSERT(api->validate_fn());
   ASSERT(soak_pool_add_remove(seed0));
   ASSERT(soak_memalign_torture(seed0 ^ 0xA5A5A5A5u));
+  ASSERT(soak_memalign_churn(seed0 ^ 0x5A5A5A5Au));
 
   if (api->reset_fn) api->reset_fn();
   soak_rt_try_locking();
@@ -1166,6 +1257,7 @@ static int test_soak(void) {
   ASSERT(api->validate_fn());
   ASSERT(soak_pool_add_remove(seed0));
   ASSERT(soak_memalign_torture(seed0 ^ 0xA5A5A5A5u));
+  ASSERT(soak_memalign_churn(seed0 ^ 0x5A5A5A5Au));
 
   if (seconds) {
     soak_rt_try_process_tuning();

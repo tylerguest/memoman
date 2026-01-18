@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-/* tlsf_t: a TLSF structure. Can contain 1 to N pools. */
+/* tlsf_t: a TLSF allocator handle (may contain 1..N pools). */
 /* pool_t: base address of a managed pool (TLSF-style). */
 typedef void* tlsf_t;
 typedef void* pool_t;
@@ -29,7 +29,8 @@ typedef void* pool_t;
 ** Create/destroy an allocator instance (in-place).
 **
 ** - `mm_create` is TLSF-style control-only creation: it does not implicitly add a pool.
-** - `mm_create_with_pool` is the convenience API for a single backing buffer: it creates control + adds the remaining bytes as the first pool.
+** - `mm_create_with_pool` is the convenience API for a single backing buffer: it creates the control block
+**   and adds the remaining bytes as the first pool.
 */
 tlsf_t mm_create(void* mem);
 tlsf_t mm_create_with_pool(void* mem, size_t bytes);
@@ -44,7 +45,7 @@ void mm_remove_pool(tlsf_t alloc, pool_t pool);
 void* mm_malloc(tlsf_t alloc, size_t bytes);
 void* mm_memalign(tlsf_t alloc, size_t align, size_t bytes);
 void* mm_realloc(tlsf_t alloc, void* ptr, size_t size);
-void  mm_free(tlsf_t alloc, void* ptr);
+void mm_free(tlsf_t alloc, void* ptr);
 
 /* Returns internal block size, not original request size. */
 size_t mm_block_size(void* ptr);

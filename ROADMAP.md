@@ -2,7 +2,7 @@
 
 ## Core Reliability
 
-- **Regression suite expansion**: add targeted tests for pool remove edge cases, memalign stress, and pointer misuse.
+- **Regression suite expansion**: add targeted tests for pool remove edge cases, memalign stress, and pointer misuse. ✅
 - **Soak hardening**: expand `test_soak` with deterministic memalign torture seeds and pool churn sequences.
 - **Fuzz harness**: add a small, reproducible fuzz driver for `mm_malloc/mm_free/mm_realloc/mm_memalign`.
 - **Invariant checks**: add optional invariant checks (compile‑time toggle) for `prev_phys`, free list loops, and bitmap consistency.
