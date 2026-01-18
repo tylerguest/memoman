@@ -3,34 +3,29 @@
 # memoman
 
 `memoman` is a deterministic, pool-based allocator inspired by TLSF (Matthew Conte’s TLSF 3.1).
-It is designed for real-time and embedded workloads where predictability matters more than peak throughput.
+It targets real-time and embedded workloads where predictability matters more than peak throughput.
 
 ## Design Goals
 
-- **O(1)** malloc/free/memalign/realloc on the hot path (bounded by FL/SL bitmap sizes, not heap size).
-- **Caller-owned memory**: the allocator never allocates or frees OS memory.
-- **TLSF-inspired block layout**: user payload starts immediately after the size word; free-list pointers live in the
-  payload when a block is free.
-- **Immediate coalescing** with correct `prev_phys` linkage.
+- O(1) malloc/free/memalign/realloc on the hot path (bounded by FL/SL bitmap sizes).
+- Caller-owned memory only; no OS allocations in the core allocator.
+- TLSF-style block layout with immediate coalescing and correct `prev_phys` linkage.
 
 ## Features
 
 - TLSF-style two-level bitmaps and segregated free lists.
-- Discontiguous pools (`mm_add_pool`) in a single allocator instance.
-- `mm_memalign` implements Conte-style gap handling.
-- Internal validation (`mm_validate`, `mm_validate_pool`).
+- Multiple discontiguous pools via `mm_add_pool` (max 32 pools).
+- Conte-style gap handling in `mm_memalign`.
+- Validation helpers: `mm_validate`, `mm_validate_pool`, `mm_check`, `mm_check_pool`.
 - Debug helpers: `mm_walk_pool`, `mm_block_size`, `mm_get_pool_for_ptr`.
-- Overhead/limits helpers: `mm_size`, `mm_align_size`, `mm_block_size_min`, `mm_block_size_max`, `mm_pool_overhead`,
-  `mm_alloc_overhead`.
+- Overhead helpers: `mm_size`, `mm_align_size`, `mm_block_size_min`, `mm_block_size_max`, `mm_pool_overhead`, `mm_alloc_overhead`.
 
-## Constraints and Invariants
+## Constraints
 
-- `mm_create()` and `mm_create_with_pool()` require the control buffer aligned to `sizeof(size_t)`.
+- `mm_create()` and `mm_create_with_pool()` require control buffers aligned to `sizeof(size_t)`.
 - `mm_add_pool()` requires `mem` and `bytes` aligned to `sizeof(size_t)`; misaligned pools are rejected.
-- Pools must be large enough for allocator overhead and at least one minimum block. Use
-  `mm_pool_overhead()` and `mm_block_size_min()` to size pools.
-- Maximum pools per allocator: **32** (`MM_MAX_POOLS`).
-- `mm_destroy()` is a no-op by design; the caller owns all memory.
+- Pools must be large enough for allocator overhead and at least one minimum block.
+- `mm_destroy()` is a no-op; the caller owns all memory.
 
 ## Quick Build & Test
 
@@ -40,8 +35,6 @@ make run DEBUG=1            # stream full per-test output
 make run TIMING=1           # show per-test timing
 make run DEBUG=1 TIMING=1   # full output + timing
 make benchmark              # optimized build (for benchmark suite)
-make demo                   # build demo binary
-./demo
 make extras                 # build extras (latency histogram demo)
 ./extras/bin/latency_histogram
 ```
@@ -131,9 +124,9 @@ int mm_reset(tlsf_t alloc);
 
 ## Debug Builds
 
-- `make debug` enables `MM_DEBUG`, which adds integrity checks and can assert on invalid frees/reallocs.
-- Behavior is controlled with:
-  - `MM_DEBUG_VALIDATE_SHIFT` (default 10): validate every 2^N operations.
+- `make debug` enables `MM_DEBUG`, adding integrity checks and assertions on invalid frees/reallocs.
+- Tunables:
+  - `MM_DEBUG_VALIDATE_SHIFT` (default 10): validate every 2^N ops.
   - `MM_DEBUG_ABORT_ON_INVALID_POINTER` (default 1).
   - `MM_DEBUG_ABORT_ON_DOUBLE_FREE` (default 0).
 
@@ -143,7 +136,6 @@ int mm_reset(tlsf_t alloc);
 .
 ├── Makefile
 ├── README.md
-├── demo.c
 ├── src/
 │   ├── memoman.c
 │   └── memoman.h
